@@ -56,6 +56,9 @@ class PracticeEntity {
     @Column(name = "needs_review", nullable = false)
     private boolean needsReview;
 
+    @Column(name = "retry_of_id")
+    private Long retryOfId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private PracticeStatus status;

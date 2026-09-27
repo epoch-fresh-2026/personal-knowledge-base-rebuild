@@ -53,7 +53,7 @@
                                 <strong>{{ result.score }}</strong><span>分</span>
                             </div>
                             <div>
-                                <p class="result-state">{{ result.needsReview ? "已加入错题列表" : "本题通过" }}</p>
+                                <p class="result-state">{{ resultState(result) }}</p>
                                 <h3>{{ result.question }}</h3>
                             </div>
                         </div>
@@ -100,7 +100,12 @@
                             <div><span>{{ item.topic }}</span><b>{{ item.score }} 分</b></div>
                             <h3>{{ item.question }}</h3>
                             <p>{{ item.feedback }}</p>
-                            <small>{{ formatTime(item.createdAt) }}</small>
+                            <div class="mistake-actions">
+                                <small>{{ formatTime(item.createdAt) }}</small>
+                                <button type="button" :disabled="retryingId === item.practiceId" @click="retryPractice(item)">
+                                    {{ retryingId === item.practiceId ? "正在出题…" : "重新练习" }}
+                                </button>
+                            </div>
                         </article>
                     </div>
                 </aside>
@@ -125,6 +130,7 @@ export default {
             healthOnline: false,
             generating: false,
             grading: false,
+            retryingId: null,
             loadingMistakes: false,
             error: ""
         };
@@ -183,6 +189,25 @@ export default {
                 this.loadingMistakes = false;
             }
         },
+        async retryPractice(item) {
+            if (this.retryingId !== null) return;
+            this.retryingId = item.practiceId;
+            this.error = "";
+            try {
+                this.current = await request(`/api/practices/${item.practiceId}/retry`, {
+                    method: "POST"
+                });
+                this.topic = item.topic;
+                this.answer = "";
+                this.result = null;
+                await this.$nextTick();
+                document.getElementById("studio-title")?.scrollIntoView({behavior: "smooth"});
+            } catch (error) {
+                this.error = `重练失败：${error.message}`;
+            } finally {
+                this.retryingId = null;
+            }
+        },
         resetPractice() {
             this.topic = "";
             this.answer = "";
@@ -195,6 +220,14 @@ export default {
             return new Intl.DateTimeFormat("zh-CN", {
                 month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit"
             }).format(new Date(value));
+        },
+        resultState(result) {
+            if (result.retryOfId) {
+                return result.needsReview
+                    ? "本次仍未通过，原错题继续保留"
+                    : "已掌握，已移出错题";
+            }
+            return result.needsReview ? "已加入错题列表" : "本题通过";
         }
     }
 };

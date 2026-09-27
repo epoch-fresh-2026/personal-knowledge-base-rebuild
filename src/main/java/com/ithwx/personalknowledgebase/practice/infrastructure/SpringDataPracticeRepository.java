@@ -6,5 +6,5 @@ import java.util.List;
 
 interface SpringDataPracticeRepository extends JpaRepository<PracticeEntity, Long> {
 
-    List<PracticeEntity> findAllByNeedsReviewTrueOrderByCreatedAtDesc();
+    List<PracticeEntity> findAllByNeedsReviewTrueAndRetryOfIdIsNullOrderByCreatedAtDesc();
 }

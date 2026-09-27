@@ -32,6 +32,32 @@ class PracticeSessionTest {
                 .hasMessageContaining("已经提交");
     }
 
+    @Test
+    void shouldCreateRetryLinkedToOriginalMistake() {
+        PracticeSession original = waitingSession();
+        original.complete("不完整回答", new PracticeEvaluation(40, "需要继续复习。"));
+
+        PracticeSession retry = PracticeSession.retryOf(
+                original,
+                new GeneratedQuestion("事务为什么需要隔离性？", "隔离性避免并发事务相互干扰。")
+        );
+
+        assertThat(retry.retryOfId()).isEqualTo(1L);
+        assertThat(retry.status()).isEqualTo(PracticeStatus.WAITING_FOR_ANSWER);
+        assertThat(retry.question()).isEqualTo("事务为什么需要隔离性？");
+        assertThat(retry.sources()).isEqualTo(original.sources());
+    }
+
+    @Test
+    void shouldMarkMistakeAsResolved() {
+        PracticeSession original = waitingSession();
+        original.complete("不完整回答", new PracticeEvaluation(40, "需要继续复习。"));
+
+        original.markReviewResolved();
+
+        assertThat(original.needsReview()).isFalse();
+    }
+
     private PracticeSession waitingSession() {
         return new PracticeSession(
                 1L,
@@ -45,7 +71,8 @@ class PracticeSessionTest {
                 null,
                 false,
                 PracticeStatus.WAITING_FOR_ANSWER,
-                LocalDateTime.now()
+                LocalDateTime.now(),
+                null
         );
     }
 }

@@ -40,7 +40,7 @@ public class JpaPracticeRepositoryAdapter implements PracticeRepository {
     @Override
     @Transactional(readOnly = true)
     public List<PracticeSession> findNeedsReview() {
-        return jpaRepository.findAllByNeedsReviewTrueOrderByCreatedAtDesc()
+        return jpaRepository.findAllByNeedsReviewTrueAndRetryOfIdIsNullOrderByCreatedAtDesc()
                 .stream()
                 .map(this::toDomain)
                 .toList();
@@ -55,6 +55,7 @@ public class JpaPracticeRepositoryAdapter implements PracticeRepository {
         entity.setScore(session.score());
         entity.setFeedback(session.feedback());
         entity.setNeedsReview(session.needsReview());
+        entity.setRetryOfId(session.retryOfId());
         entity.setStatus(session.status());
         entity.setCreatedAt(session.createdAt());
         entity.setSources(new ArrayList<>(session.sources().stream()
@@ -75,7 +76,8 @@ public class JpaPracticeRepositoryAdapter implements PracticeRepository {
                 entity.getFeedback(),
                 entity.isNeedsReview(),
                 entity.getStatus(),
-                entity.getCreatedAt()
+                entity.getCreatedAt(),
+                entity.getRetryOfId()
         );
     }
 }

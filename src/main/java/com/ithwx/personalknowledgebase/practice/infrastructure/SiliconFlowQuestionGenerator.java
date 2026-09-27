@@ -22,6 +22,28 @@ public class SiliconFlowQuestionGenerator implements QuestionGenerator {
 
     @Override
     public GeneratedQuestion generate(String topic, List<PracticeSource> sources) {
+        return generateQuestion(topic, sources, "");
+    }
+
+    @Override
+    public GeneratedQuestion generateRetry(
+            String topic,
+            String previousQuestion,
+            List<PracticeSource> sources
+    ) {
+        String retryInstruction = """
+
+                上一道题：%s
+                请换一个角度重新出题，不要生成与上一道完全相同的问题。
+                """.formatted(previousQuestion);
+        return generateQuestion(topic, sources, retryInstruction);
+    }
+
+    private GeneratedQuestion generateQuestion(
+            String topic,
+            List<PracticeSource> sources,
+            String retryInstruction
+    ) {
         String prompt = """
                 你是基于个人知识库出题的复习助手。
                 只能依据给定资料，围绕复习主题生成一道答案明确的简答题。
@@ -29,10 +51,11 @@ public class SiliconFlowQuestionGenerator implements QuestionGenerator {
                 只输出 JSON：{"question":"题目","referenceAnswer":"参考答案"}
 
                 复习主题：%s
+                %s
 
                 资料：
                 %s
-                """.formatted(topic, formatSources(sources));
+                """.formatted(topic, retryInstruction, formatSources(sources));
 
         QuestionResponse response = parse(chatModel.call(prompt), QuestionResponse.class);
         return new GeneratedQuestion(response.question(), response.referenceAnswer());

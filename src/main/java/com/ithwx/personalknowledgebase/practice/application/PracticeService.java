@@ -10,6 +10,7 @@ import com.ithwx.personalknowledgebase.practice.domain.PracticeSession;
 import com.ithwx.personalknowledgebase.practice.domain.PracticeSource;
 import com.ithwx.personalknowledgebase.practice.domain.QuestionGenerator;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -52,12 +53,37 @@ public class PracticeService {
         return practiceRepository.save(session);
     }
 
+    @Transactional
     public PracticeSession answer(Long id, String userAnswer) {
         PracticeSession session = requiredSession(id);
         String normalizedAnswer = userAnswer.strip();
         PracticeEvaluation evaluation = answerEvaluator.evaluate(session, normalizedAnswer);
         session.complete(normalizedAnswer, evaluation);
-        return practiceRepository.save(session);
+        PracticeSession saved = practiceRepository.save(session);
+        if (saved.retryOfId() != null && !saved.needsReview()) {
+            PracticeSession original = requiredSession(saved.retryOfId());
+            original.markReviewResolved();
+            practiceRepository.save(original);
+        }
+        return saved;
+    }
+
+    @Transactional
+    public PracticeSession retry(Long id) {
+        PracticeSession selected = requiredSession(id);
+        PracticeSession original = selected.retryOfId() == null
+                ? selected
+                : requiredSession(selected.retryOfId());
+        if (!original.needsReview()) {
+            throw new IllegalArgumentException("该错题已经掌握");
+        }
+        GeneratedQuestion generated = questionGenerator.generateRetry(
+                original.topic(),
+                selected.question(),
+                original.sources()
+        );
+        return practiceRepository.save(
+                PracticeSession.retryOf(original, generated));
     }
 
     public List<PracticeSession> mistakes() {

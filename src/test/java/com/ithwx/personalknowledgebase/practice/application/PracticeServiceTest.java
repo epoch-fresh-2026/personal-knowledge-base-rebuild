@@ -104,9 +104,49 @@ class PracticeServiceTest {
                 .isInstanceOf(NoSuchElementException.class);
     }
 
+    @Test
+    void shouldCreateRetryFromOriginalMistake() {
+        PracticeSession original = completedMistake(9L, null);
+        when(practiceRepository.findById(9L)).thenReturn(Optional.of(original));
+        when(questionGenerator.generateRetry(
+                original.topic(), original.question(), original.sources()))
+                .thenReturn(new GeneratedQuestion(
+                        "事务为什么需要隔离性？",
+                        "隔离性避免并发事务相互干扰。"));
+        when(practiceRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        PracticeSession retry = service.retry(9L);
+
+        assertThat(retry.retryOfId()).isEqualTo(9L);
+        assertThat(retry.status()).isEqualTo(PracticeStatus.WAITING_FOR_ANSWER);
+        assertThat(retry.question()).isEqualTo("事务为什么需要隔离性？");
+    }
+
+    @Test
+    void shouldResolveOriginalMistakeWhenRetryPasses() {
+        PracticeSession original = completedMistake(9L, null);
+        PracticeSession retry = waitingSession(10L, 9L);
+        when(practiceRepository.findById(10L)).thenReturn(Optional.of(retry));
+        when(practiceRepository.findById(9L)).thenReturn(Optional.of(original));
+        when(answerEvaluator.evaluate(retry, "完整回答")).thenReturn(
+                new PracticeEvaluation(80, "本次已经掌握。")
+        );
+        when(practiceRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        PracticeSession completed = service.answer(10L, "完整回答");
+
+        assertThat(completed.needsReview()).isFalse();
+        assertThat(original.needsReview()).isFalse();
+        verify(practiceRepository).save(original);
+    }
+
     private PracticeSession waitingSession() {
+        return waitingSession(9L, null);
+    }
+
+    private PracticeSession waitingSession(Long id, Long retryOfId) {
         return new PracticeSession(
-                9L,
+                id,
                 "数据库事务",
                 "事务的 ACID 分别是什么？",
                 "原子性、一致性、隔离性和持久性。",
@@ -117,7 +157,14 @@ class PracticeServiceTest {
                 null,
                 false,
                 PracticeStatus.WAITING_FOR_ANSWER,
-                LocalDateTime.now()
+                LocalDateTime.now(),
+                retryOfId
         );
+    }
+
+    private PracticeSession completedMistake(Long id, Long retryOfId) {
+        PracticeSession session = waitingSession(id, retryOfId);
+        session.complete("不完整回答", new PracticeEvaluation(40, "需要继续复习。"));
+        return session;
     }
 }
