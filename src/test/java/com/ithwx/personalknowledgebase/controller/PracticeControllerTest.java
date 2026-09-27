@@ -85,6 +85,18 @@ class PracticeControllerTest {
                 .andExpect(jsonPath("$[0].score").value(40));
     }
 
+    @Test
+    void shouldCreateRetryQuestion() throws Exception {
+        PracticeSession retry = retrySession();
+        when(practiceService.retry(7L)).thenReturn(retry);
+
+        mockMvc.perform(post("/api/practices/7/retry"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.practiceId").value(8))
+                .andExpect(jsonPath("$.question").value("事务为什么需要隔离性？"))
+                .andExpect(jsonPath("$.referenceAnswer").doesNotExist());
+    }
+
     private PracticeSession waitingSession() {
         return new PracticeSession(
                 7L,
@@ -98,7 +110,26 @@ class PracticeControllerTest {
                 null,
                 false,
                 PracticeStatus.WAITING_FOR_ANSWER,
-                LocalDateTime.of(2026, 9, 26, 10, 0)
+                LocalDateTime.of(2026, 9, 26, 10, 0),
+                null
+        );
+    }
+
+    private PracticeSession retrySession() {
+        return new PracticeSession(
+                8L,
+                "数据库事务",
+                "事务为什么需要隔离性？",
+                "隔离性避免并发事务相互干扰。",
+                "[资料 1] 数据库笔记\n事务具有 ACID 特性。",
+                List.of(new PracticeSource(1L, "数据库笔记", "FILE", null, 0, "事务具有 ACID 特性。")),
+                null,
+                null,
+                null,
+                false,
+                PracticeStatus.WAITING_FOR_ANSWER,
+                LocalDateTime.of(2026, 9, 26, 11, 0),
+                7L
         );
     }
 }

@@ -19,6 +19,7 @@ public class PracticeSession {
     private String feedback;
     private boolean needsReview;
     private PracticeStatus status;
+    private final Long retryOfId;
 
     public PracticeSession(
             Long id,
@@ -32,7 +33,8 @@ public class PracticeSession {
             String feedback,
             boolean needsReview,
             PracticeStatus status,
-            LocalDateTime createdAt
+            LocalDateTime createdAt,
+            Long retryOfId
     ) {
         this.id = id;
         this.topic = topic;
@@ -46,6 +48,7 @@ public class PracticeSession {
         this.needsReview = needsReview;
         this.status = status;
         this.createdAt = createdAt;
+        this.retryOfId = retryOfId;
     }
 
     public static PracticeSession start(
@@ -66,7 +69,38 @@ public class PracticeSession {
                 null,
                 false,
                 PracticeStatus.WAITING_FOR_ANSWER,
-                LocalDateTime.now()
+                LocalDateTime.now(),
+                null
+        );
+    }
+
+    public static PracticeSession retryOf(
+            PracticeSession original,
+            GeneratedQuestion generatedQuestion
+    ) {
+        if (original.id == null) {
+            throw new IllegalArgumentException("原错题必须已经保存");
+        }
+        if (original.status != PracticeStatus.COMPLETED || !original.needsReview) {
+            throw new IllegalArgumentException("只有未掌握的错题可以重新练习");
+        }
+        Long rootPracticeId = original.retryOfId == null
+                ? original.id
+                : original.retryOfId;
+        return new PracticeSession(
+                null,
+                original.topic,
+                generatedQuestion.question(),
+                generatedQuestion.referenceAnswer(),
+                original.evidenceSnapshot,
+                original.sources,
+                null,
+                null,
+                null,
+                false,
+                PracticeStatus.WAITING_FOR_ANSWER,
+                LocalDateTime.now(),
+                rootPracticeId
         );
     }
 
@@ -82,6 +116,13 @@ public class PracticeSession {
         feedback = evaluation.feedback();
         needsReview = score < PASSING_SCORE;
         status = PracticeStatus.COMPLETED;
+    }
+
+    public void markReviewResolved() {
+        if (status != PracticeStatus.COMPLETED) {
+            throw new IllegalArgumentException("未完成的练习不能标记为已掌握");
+        }
+        needsReview = false;
     }
 
     public Long id() {
@@ -130,5 +171,9 @@ public class PracticeSession {
 
     public LocalDateTime createdAt() {
         return createdAt;
+    }
+
+    public Long retryOfId() {
+        return retryOfId;
     }
 }

@@ -53,7 +53,8 @@ class SiliconFlowAnswerEvaluatorTest {
                 null,
                 false,
                 PracticeStatus.WAITING_FOR_ANSWER,
-                LocalDateTime.now()
+                LocalDateTime.now(),
+                null
         );
     }
 }

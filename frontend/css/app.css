@@ -2021,11 +2021,33 @@ a.source-card:hover {
     -webkit-line-clamp: 2;
 }
 
+.mistake-actions {
+    display: flex;
+    min-height: auto;
+    align-items: center;
+    justify-content: space-between;
+    margin: 10px 0 0;
+    color: inherit;
+    letter-spacing: 0;
+}
+
 .mistake-list small {
-    display: block;
-    margin-top: 8px;
     color: #a0abb5;
     font-size: 8px;
+}
+
+.mistake-actions button {
+    padding: 5px 9px;
+    border: 0;
+    border-radius: 7px;
+    color: var(--primary);
+    background: #e7f4f6;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+.mistake-actions button:hover {
+    background: #d8edf1;
 }
 
 @media (max-width: 940px) {

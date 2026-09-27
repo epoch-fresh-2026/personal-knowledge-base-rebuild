@@ -38,4 +38,21 @@ class SiliconFlowQuestionGeneratorTest {
         verify(chatModel).call(prompt.capture());
         assertThat(prompt.getValue()).contains("数据库事务", "原子性要求事务不可分割", "只能依据");
     }
+
+    @Test
+    void shouldAskForDifferentQuestionWhenRetrying() {
+        when(chatModel.call(anyString())).thenReturn(
+                "{\"question\":\"事务为什么需要隔离性？\",\"referenceAnswer\":\"隔离性避免并发事务相互干扰。\"}");
+        SiliconFlowQuestionGenerator generator = new SiliconFlowQuestionGenerator(chatModel);
+
+        generator.generateRetry(
+                "数据库事务",
+                "事务的 ACID 分别是什么？",
+                List.of(new PracticeSource(1L, "数据库笔记", "FILE", null, 0, "隔离性避免并发事务相互干扰。"))
+        );
+
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(chatModel).call(prompt.capture());
+        assertThat(prompt.getValue()).contains("事务的 ACID 分别是什么", "换一个角度", "不要生成与上一道完全相同");
+    }
 }

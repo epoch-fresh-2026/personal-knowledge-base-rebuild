@@ -12,7 +12,8 @@
 - 资料查询、修改、替换和删除
 - 混合检索、模型重排、Agent 按需二次检索、无依据拒答和来源追踪
 - 问答会话保存与刷新恢复
-- 资料管理与知识问答页面
+- 资料管理、知识问答和知识自测页面
+- 基于知识库生成练习题，记录错题并支持重新练习
 
 ## 核心流程
 
@@ -21,6 +22,8 @@
 
 用户提问 → 混合检索 → 模型重排 → Agent 判断证据
         → 必要时改写问题并再次检索 → 回答或拒答 → 保存会话
+
+选择复习主题 → 基于知识库出题 → 作答与评分 → 错题重练 → 通过后移出错题
 ```
 
 ## 技术栈
@@ -121,6 +124,10 @@ mvn verify
 | `DELETE` | `/api/documents/{id}` | 删除资料 |
 | `POST` | `/api/chat` | 知识库问答 |
 | `GET` | `/api/chat/{conversationId}` | 查询会话历史 |
+| `POST` | `/api/practices` | 生成自测题 |
+| `POST` | `/api/practices/{id}/answer` | 提交答案并评分 |
+| `GET` | `/api/practices/mistakes` | 查询错题 |
+| `POST` | `/api/practices/{id}/retry` | 重新练习错题 |
 
 ## 设计文档
 
@@ -130,6 +137,8 @@ mvn verify
 - [知识索引模块（Issue #60）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/60)
 - [知识问答模块（Issue #67）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/67)
 - [Vue 前端（Issue #74）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/74)
+- [知识自测（Issue #89）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/89)
+- [错题重练（Issue #91）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/91)
 - [工程支持（Issue #24）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/24)
 
 ## 密钥安全

@@ -45,6 +45,12 @@ public class PracticeController {
                 practiceService.answer(id, request.answer()));
     }
 
+    @PostMapping("/{id}/retry")
+    @ResponseStatus(HttpStatus.CREATED)
+    public PracticeQuestionResponse retry(@PathVariable Long id) {
+        return PracticeQuestionResponse.from(practiceService.retry(id));
+    }
+
     @GetMapping("/mistakes")
     public List<PracticeResultResponse> mistakes() {
         return practiceService.mistakes().stream()
