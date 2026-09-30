@@ -94,20 +94,13 @@ public class DocumentService {
 
     public void delete(Long id) {
         Document document = requiredDocument(id);
+        processDocument.cancel(id);
         repository.delete(document);
         eventPublisher.publishEvent(new DocumentDeleted(id));
     }
 
     public Document retry(Long id) {
         return processDocument.retry(id);
-    }
-
-    public void markReady(Long id, int chunkCount) {
-        processDocument.markReady(id, chunkCount);
-    }
-
-    public void markFailed(Long id, String reason) {
-        processDocument.markFailed(id, reason);
     }
 
     private Document pending(String name, String type) {
