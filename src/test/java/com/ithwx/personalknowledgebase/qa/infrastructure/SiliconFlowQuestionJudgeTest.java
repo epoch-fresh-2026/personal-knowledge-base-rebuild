@@ -13,7 +13,9 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -31,6 +33,10 @@ class SiliconFlowQuestionJudgeTest {
                 "支持什么格式？", List.of(), List.of(evidence("支持 TXT。")));
 
         assertTrue(decision.sufficient());
+        verify(chatModel).call(argThat((String prompt) ->
+                prompt.contains("来源：资料")
+                        && prompt.contains("相关度：0.90")
+                        && prompt.contains("内容：支持 TXT。")));
     }
 
     @Test

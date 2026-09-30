@@ -29,6 +29,7 @@ spring:
       chat:
         options:
           model: ${CHAT_MODEL:Qwen/Qwen2.5-7B-Instruct}
+          temperature: 0
     vectorstore:
       pgvector:
         initialize-schema: true
