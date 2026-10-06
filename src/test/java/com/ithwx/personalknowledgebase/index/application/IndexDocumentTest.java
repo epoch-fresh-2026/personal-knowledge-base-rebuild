@@ -3,7 +3,6 @@ package com.ithwx.personalknowledgebase.index.application;
 import com.ithwx.personalknowledgebase.index.domain.KnowledgeChunk;
 import com.ithwx.personalknowledgebase.index.domain.KnowledgeIndex;
 import com.ithwx.personalknowledgebase.index.infrastructure.TextChunker;
-import com.ithwx.personalknowledgebase.library.application.DocumentService;
 import com.ithwx.personalknowledgebase.library.domain.DocumentDeleted;
 import com.ithwx.personalknowledgebase.library.domain.DocumentTextReady;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +15,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
@@ -28,41 +28,39 @@ class IndexDocumentTest {
     private TextChunker textChunker;
     @Mock
     private KnowledgeIndex knowledgeIndex;
-    @Mock
-    private DocumentService documentService;
-
     private IndexDocument indexDocument;
 
     @BeforeEach
     void setUp() {
-        indexDocument = new IndexDocument(textChunker, knowledgeIndex, documentService);
+        indexDocument = new IndexDocument(textChunker, knowledgeIndex);
     }
 
     @Test
-    void shouldBuildIndexAndMarkDocumentReady() {
+    void shouldBuildIndexAndReturnChunkCount() {
         DocumentTextReady event = event();
         when(textChunker.split(event.content())).thenReturn(List.of("第一段", "第二段"));
 
-        indexDocument.onTextReady(event);
+        int chunkCount = indexDocument.index(event);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<KnowledgeChunk>> chunks = ArgumentCaptor.forClass(List.class);
         verify(knowledgeIndex).replace(org.mockito.ArgumentMatchers.eq(1L), chunks.capture());
         assertEquals("第一段", chunks.getValue().get(0).text());
         assertEquals("Spring 笔记", chunks.getValue().get(0).documentName());
-        verify(documentService).markReady(1L, 2);
+        assertEquals(2, chunkCount);
     }
 
     @Test
-    void shouldMarkDocumentFailedWhenIndexFails() {
+    void shouldPropagateIndexFailureToDurableWorker() {
         DocumentTextReady event = event();
         when(textChunker.split(event.content())).thenReturn(List.of("正文"));
         doThrow(new RuntimeException("向量服务失败"))
                 .when(knowledgeIndex).replace(org.mockito.ArgumentMatchers.eq(1L), anyList());
 
-        indexDocument.onTextReady(event);
-
-        verify(documentService).markFailed(1L, "向量服务失败");
+        RuntimeException exception = assertThrows(
+                RuntimeException.class,
+                () -> indexDocument.index(event));
+        assertEquals("向量服务失败", exception.getMessage());
     }
 
     @Test

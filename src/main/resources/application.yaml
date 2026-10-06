@@ -40,6 +40,13 @@ spring:
 app:
   storage:
     directory: ${DOCUMENT_STORAGE_DIRECTORY:data/documents}
+  ingestion:
+    poll-interval: 1s
+    lease-duration: 15m
+    worker:
+      core-pool-size: 2
+      max-pool-size: 4
+      queue-capacity: 20
   chunk:
     max-chars: 500
     overlap-chars: 50

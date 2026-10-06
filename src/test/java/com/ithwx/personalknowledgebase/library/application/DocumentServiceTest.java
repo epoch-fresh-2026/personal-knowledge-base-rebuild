@@ -118,21 +118,17 @@ class DocumentServiceTest {
 
         service.delete(1L);
 
-        InOrder order = inOrder(repository, eventPublisher);
+        InOrder order = inOrder(processDocument, repository, eventPublisher);
+        order.verify(processDocument).cancel(1L);
         order.verify(repository).delete(existingDocument);
         order.verify(eventPublisher).publishEvent(new DocumentDeleted(1L));
     }
 
     @Test
-    void shouldDelegateRetryAndIndexResultToAsyncProcessor() {
+    void shouldDelegateRetryToAsyncProcessor() {
         when(processDocument.retry(1L)).thenReturn(existingDocument);
 
         assertSame(existingDocument, service.retry(1L));
-        service.markReady(1L, 2);
-        service.markFailed(1L, "失败");
-
-        verify(processDocument).markReady(1L, 2);
-        verify(processDocument).markFailed(1L, "失败");
     }
 
     private void stubSavingWithId() {
