@@ -12,10 +12,15 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -73,6 +78,56 @@ class ChatServiceTest {
 
         assertThrows(java.util.NoSuchElementException.class,
                 () -> service.getConversation(99L));
+    }
+
+    @Test
+    void shouldSaveStreamingAnswerOnlyAfterGenerationCompletes() {
+        ChatService service = new ChatService(conversationRepository, answerQuestion);
+        when(answerQuestion.answerStreaming(eq("问题"), anyList(), any(), any()))
+                .thenReturn(result());
+        when(conversationRepository.save(any(Conversation.class))).thenAnswer(invocation -> {
+            Conversation conversation = invocation.getArgument(0);
+            return new Conversation(10L, conversation.createdAt(), conversation.messages());
+        });
+
+        ChatAnswer answer = service.askStreaming(null, " 问题 ", ignored -> {}, ignored -> {});
+
+        assertEquals(10L, answer.conversationId());
+        ArgumentCaptor<Conversation> captor = ArgumentCaptor.forClass(Conversation.class);
+        verify(conversationRepository).save(captor.capture());
+        assertEquals(2, captor.getValue().messages().size());
+        assertEquals(result().answer(), captor.getValue().messages().get(1).content());
+    }
+
+    @Test
+    void shouldNotSavePartialAnswerWhenGenerationFails() {
+        when(answerQuestion.answerStreaming(eq("问题"), anyList(), any(), any()))
+                .thenAnswer(invocation -> {
+                    Consumer<String> delta = invocation.getArgument(3);
+                    delta.accept("半截回答");
+                    throw new IllegalStateException("上游失败");
+                });
+        ChatService service = new ChatService(conversationRepository, answerQuestion);
+
+        assertThrows(IllegalStateException.class,
+                () -> service.askStreaming(null, "问题", ignored -> {}, ignored -> {}));
+        verify(conversationRepository, never()).save(any());
+    }
+
+    @Test
+    void shouldNotSaveWhenCancellationWasObservedBeforeCommit() {
+        when(answerQuestion.answerStreaming(eq("问题"), anyList(), any(), any()))
+                .thenAnswer(invocation -> {
+                    Thread.currentThread().interrupt();
+                    return result();
+                });
+        try {
+            assertThrows(CancellationException.class, () -> new ChatService(conversationRepository, answerQuestion)
+                    .askStreaming(null, "问题", ignored -> {}, ignored -> {}));
+            verify(conversationRepository, never()).save(any());
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     private ChatAnswer result() {

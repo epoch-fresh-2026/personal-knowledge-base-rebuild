@@ -12,6 +12,7 @@
 - 资料查询、修改、替换和删除
 - 混合检索、模型重排、Agent 按需二次检索、无依据拒答和来源追踪
 - 问答会话保存与刷新恢复
+- 流式显示回答、检索阶段提示和停止生成
 - 资料管理、知识问答和知识自测页面
 - 基于知识库生成练习题，记录错题并支持重新练习
 
@@ -31,6 +32,10 @@
 所有资料处理都经过有界线程池。删除、编辑、替换和重试先锁定并失效旧任务，提交后才唤醒 Worker。索引按资料 ID 在事务中替换，并使用稳定分块 ID，恢复执行不会留下重复片段。模型调用可能重做，不保证只调用一次。
 
 默认租约为 15 分钟，心跳间隔为 30 秒，向量请求每批最多 32 个分块；配置位于 `app.ingestion`。心跳间隔必须小于租约时长，异常退出后的接手需要等待剩余租期。详细流程和测试说明见 [入库并发安全设计](docs/ingestion-safety.md)。
+
+问答页使用 `POST /api/chat/stream` 接收 SSE：`status` 表示实际处理阶段（检索、判断证据、二次检索、生成），`delta` 是模型实时返回的文本，`done` 包含已保存的完整回答和来源，`error` 表示生成失败。阶段提示不是模型内部思维链。普通 `POST /api/chat` 仍保持原有行为。
+
+流式问答在同一后端进程中一次只处理 1 个请求，不支持多请求同时生成或等待排队；忙时直接返回 503，提示稍后重试。前端仍然一次只发送一个问题。连接超时为 5 分钟。停止、断线或超时被服务端观察到后会取消任务并关闭模型流订阅；生成过程中失败不会保存半截回答，页面会标明“未完成”。断线只能在容器通知或下一次写入时被发现，且取消不保证模型供应商立即停止计费。完整生成才保存会话，但保存成功后若连接断开，客户端仍可能收不到 `done`；目前不做自动重试、断点续传或事件回放。
 
 ## 技术栈
 
@@ -110,6 +115,7 @@ mvn spring-boot:run
 ```powershell
 cd frontend
 npm ci
+npm test
 npm run build
 cd ..
 mvn verify
@@ -123,7 +129,9 @@ mvn test
 
 真实数据库测试覆盖并发领取、跳过已锁任务、心跳续租、失效任务保护、索引与状态事务回滚、并发删除、编辑和文件替换失败。恢复测试会强制终止一个独立 JVM，再启动新 JVM，从持久化的 `INDEXING` 阶段继续并验证没有重复索引。这验证的是应用进程异常退出，不包含数据库磁盘损坏或原文件丢失。
 
-前端开发时也可以在 `frontend` 目录运行 `npm run dev`，然后访问 <http://localhost:5173>；Vite 会把 `/api` 请求转发到 8080 端口的 Spring Boot。GitHub Actions 会在创建 PR 和更新 `main` 时自动构建前端并执行后端测试。
+流式测试覆盖模型流逐段转发、订阅取消、SSE 超时、单请求执行与不排队、完整回答保存，以及前端汉字分块解码、提前显示、异常和停止生成。使用测试模型，不消耗真实 API Token。
+
+前端开发时也可以在 `frontend` 目录运行 `npm run dev`，然后访问 <http://localhost:5173>；Vite 会把 `/api` 请求转发到 8080 端口的 Spring Boot。GitHub Actions 会在创建 PR 和更新 `main` 时自动执行前端测试、构建前端并执行后端测试。
 
 ## 主要接口
 
@@ -139,6 +147,7 @@ mvn test
 | `POST` | `/api/documents/{id}/retry` | 重新处理失败资料 |
 | `DELETE` | `/api/documents/{id}` | 删除资料 |
 | `POST` | `/api/chat` | 知识库问答 |
+| `POST` | `/api/chat/stream` | 流式问答与处理阶段事件 |
 | `GET` | `/api/chat/{conversationId}` | 查询会话历史 |
 | `POST` | `/api/practices` | 生成自测题 |
 | `POST` | `/api/practices/{id}/answer` | 提交答案并评分 |
@@ -157,6 +166,7 @@ mvn test
 - [错题重练（Issue #91）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/91)
 - [可恢复入库（Issue #95）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/95)
 - [入库并发安全（Issue #97）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/97)
+- [流式问答与阶段提示（Issue #100）](https://github.com/epoch-fresh-2026/personal-knowledge-base-rebuild/issues/100)
 - [工程支持（Issue #24）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/24)
 
 ## 密钥安全

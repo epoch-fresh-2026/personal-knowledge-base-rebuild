@@ -1137,9 +1137,14 @@ footer {
     font-size: 10px;
 }
 
-.clear-chat:hover {
+.clear-chat:hover:not(:disabled) {
     color: var(--danger);
     background: #fff1f1;
+}
+
+.clear-chat:disabled {
+    opacity: .5;
+    cursor: not-allowed;
 }
 
 .messages {
@@ -1346,6 +1351,12 @@ footer {
     color: var(--primary);
 }
 
+.retrieval-trace[role="alert"] {
+    border-color: var(--danger);
+    color: var(--danger);
+    background: #fff1f1;
+}
+
 .sources-block {
     margin-top: 13px;
 }
@@ -1503,6 +1514,15 @@ a.source-card:hover {
 
 .send-button:hover {
     background: var(--primary-dark);
+}
+
+.stop-button,
+.stop-button:hover {
+    background: var(--danger);
+}
+
+.stop-button:hover {
+    filter: brightness(.9);
 }
 
 @media (max-width: 820px) {

@@ -12,12 +12,17 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -103,6 +108,48 @@ class AnswerQuestionTest {
         assertTrue(answer.sources().isEmpty());
         verify(answerGenerator, never()).generate(
                 org.mockito.ArgumentMatchers.anyString(), anyList(), anyList());
+    }
+
+    @Test
+    void shouldStreamWithRealRetrievalStagesAndKeepSources() {
+        when(searchKnowledge.search("问题"))
+                .thenReturn(List.of(result(1L, 0, "证据", 0.9)));
+        when(questionJudge.decide(anyString(), anyList(), anyList()))
+                .thenReturn(RetrievalDecision.retry("改写问题"), RetrievalDecision.enough());
+        when(searchKnowledge.search("改写问题"))
+                .thenReturn(List.of(result(1L, 1, "补充证据", 0.95)));
+        doAnswer(invocation -> {
+            Consumer<String> delta = invocation.getArgument(3);
+            delta.accept("第一段");
+            delta.accept("第二段");
+            return "第一段第二段";
+        }).when(answerGenerator).generateStreaming(anyString(), anyList(), anyList(), any());
+        List<String> stages = new ArrayList<>();
+        List<String> deltas = new ArrayList<>();
+
+        ChatAnswer answer = service().answerStreaming("问题", List.of(), stages::add, deltas::add);
+
+        assertEquals(List.of("正在检索资料", "找到 1 个片段，正在判断证据",
+                "证据不足，正在二次检索", "二次检索完成，正在重新判断证据", "正在生成回答"), stages);
+        assertEquals(List.of("第一段", "第二段"), deltas);
+        assertEquals("第一段第二段", answer.answer());
+        assertTrue(answer.secondSearchExecuted());
+        assertEquals(List.of(1, 0), answer.sources().get(0).chunkIndexes());
+        verify(answerGenerator, never()).generate(anyString(), anyList(), anyList());
+    }
+
+    @Test
+    void shouldStreamRefusalWithoutCallingAnswerModel() {
+        when(searchKnowledge.search("未知问题")).thenReturn(List.of());
+        when(questionJudge.decide(anyString(), anyList(), anyList()))
+                .thenReturn(RetrievalDecision.retry(null));
+        List<String> deltas = new ArrayList<>();
+
+        ChatAnswer answer = service().answerStreaming("未知问题", List.of(), ignored -> {}, deltas::add);
+
+        assertTrue(answer.refused());
+        assertEquals(List.of(AnswerQuestion.NO_EVIDENCE_MESSAGE), deltas);
+        verify(answerGenerator, never()).generateStreaming(anyString(), anyList(), anyList(), any());
     }
 
     private AnswerQuestion service() {
