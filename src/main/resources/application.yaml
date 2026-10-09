@@ -43,6 +43,8 @@ app:
   ingestion:
     poll-interval: 1s
     lease-duration: 15m
+    heartbeat-interval: 30s
+    embedding-batch-size: 32
     worker:
       core-pool-size: 2
       max-pool-size: 4

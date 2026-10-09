@@ -1,5 +1,6 @@
 package com.ithwx.personalknowledgebase.library.domain;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
@@ -15,16 +16,12 @@ public interface IngestionJobRepository {
             LocalDateTime leaseUntil
     );
 
-    boolean advance(
-            Long jobId,
-            String leaseOwner,
-            IngestionStage stage,
-            LocalDateTime leaseUntil
-    );
+    // 必须在调用者的事务中使用，行锁保持到结果提交或回滚。
+    Optional<IngestionJob> findOwnedForUpdate(Long jobId, String leaseOwner);
 
-    boolean complete(Long jobId, String leaseOwner);
+    void save(IngestionJob job);
 
-    boolean fail(Long jobId, String leaseOwner, String reason);
+    boolean renew(Long jobId, String leaseOwner, Duration leaseDuration);
 
     void cancelByDocumentId(Long documentId);
 }

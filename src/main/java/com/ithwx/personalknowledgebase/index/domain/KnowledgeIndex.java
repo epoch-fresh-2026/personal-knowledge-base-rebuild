@@ -6,7 +6,9 @@ public interface KnowledgeIndex {
 
     List<KnowledgeChunk> search(SearchQuery query);
 
-    void replace(Long documentId, List<KnowledgeChunk> chunks);
+    PreparedIndex prepare(Long documentId, List<KnowledgeChunk> chunks);
+
+    void replace(PreparedIndex prepared);
 
     void delete(Long documentId);
 }

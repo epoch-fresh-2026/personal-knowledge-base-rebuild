@@ -73,10 +73,8 @@ class JpaIngestionJobRepositoryAdapterTest {
         when(jpaRepository.findByIdForUpdate(10L))
                 .thenReturn(Optional.of(claimedEntity));
 
-        assertFalse(adapter.advance(
-                10L, "stale-worker", IngestionStage.INDEXING, now.plusMinutes(5)));
-        assertTrue(adapter.advance(
-                10L, "new-worker", IngestionStage.INDEXING, now.plusMinutes(10)));
+        assertFalse(adapter.findOwnedForUpdate(10L, "stale-worker").isPresent());
+        assertTrue(adapter.findOwnedForUpdate(10L, "new-worker").isPresent());
     }
 
     @Test

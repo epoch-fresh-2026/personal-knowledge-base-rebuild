@@ -1,51 +1,55 @@
 package com.ithwx.personalknowledgebase.index.infrastructure;
 
 import com.ithwx.personalknowledgebase.index.domain.KnowledgeChunk;
+import com.ithwx.personalknowledgebase.index.domain.PreparedIndex;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.verify;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class PgVectorKnowledgeIndexTest {
-
-    @Mock
-    private VectorStore vectorStore;
-    @Mock
-    private JdbcTemplate jdbcTemplate;
-
-    private PgVectorKnowledgeIndex knowledgeIndex;
+    @Mock private VectorStore vectorStore;
+    @Mock private JdbcTemplate jdbc;
+    @Mock private EmbeddingModel model;
+    private PgVectorKnowledgeIndex index;
 
     @BeforeEach
     void setUp() {
-        knowledgeIndex = new PgVectorKnowledgeIndex(vectorStore, jdbcTemplate);
+        index = new PgVectorKnowledgeIndex(vectorStore, jdbc, model, 1);
     }
 
     @Test
-    void shouldReplaceVectorsWithChunkMetadata() {
-        KnowledgeChunk chunk = new KnowledgeChunk(
-                1L, "Spring 笔记", "note", null,
-                0, "正文");
+    void shouldComputeVectorsInBoundedBatchesWithoutWriting() {
+        when(model.embed(List.of("第一段"))).thenReturn(List.of(new float[]{1, 0, 0}));
+        when(model.embed(List.of("第二段"))).thenReturn(List.of(new float[]{0, 1, 0}));
+        PreparedIndex prepared = index.prepare(1L, List.of(chunk(1L, 0, "第一段"), chunk(1L, 1, "第二段")));
+        assertEquals(2, prepared.chunks().size());
+        assertArrayEquals(new float[]{0, 1, 0}, prepared.chunks().get(1).embedding());
+        verifyNoInteractions(jdbc, vectorStore);
+    }
 
-        knowledgeIndex.replace(1L, List.of(chunk));
+    @Test
+    void shouldRejectIncompleteEmbeddingResponseBeforeAnyWrite() {
+        when(model.embed(List.of("正文"))).thenReturn(List.of());
+        assertThrows(IllegalStateException.class, () -> index.prepare(1L, List.of(chunk(1L, 0, "正文"))));
+        verifyNoInteractions(jdbc);
+    }
 
-        verify(vectorStore).delete(any(org.springframework.ai.vectorstore.filter.Filter.Expression.class));
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<org.springframework.ai.document.Document>> documents =
-                ArgumentCaptor.forClass(List.class);
-        verify(vectorStore).add(documents.capture());
-        assertEquals("正文", documents.getValue().get(0).getText());
-        assertEquals("Spring 笔记", documents.getValue().get(0).getMetadata().get("documentName"));
+    @Test
+    void shouldWritePreparedVectorsWithoutCallingModel() {
+        index.replace(new PreparedIndex(1L, List.of(new PreparedIndex.EmbeddedChunk(chunk(1L, 0, "正文"), new float[]{1, 0, 0}))));
+        verify(jdbc).update("DELETE FROM vector_store WHERE metadata ->> 'documentId' = ?", "1");
+        verifyNoInteractions(model, vectorStore);
     }
 
     @Test
@@ -53,21 +57,10 @@ class PgVectorKnowledgeIndexTest {
         KnowledgeChunk both = chunk(1L, 0, "同时命中");
         KnowledgeChunk vectorOnly = chunk(2L, 0, "仅向量命中");
         KnowledgeChunk keywordOnly = chunk(3L, 0, "仅关键词命中");
-
-        List<KnowledgeChunk> results = knowledgeIndex.merge(
-                List.of(both, vectorOnly),
-                List.of(keywordOnly, both)
-        );
-
-        assertEquals(both, results.get(0));
-        assertEquals(keywordOnly, results.get(2));
-        assertEquals(3, results.size());
+        assertEquals(List.of(both, vectorOnly, keywordOnly), index.merge(List.of(both, vectorOnly), List.of(keywordOnly, both)));
     }
 
-    private KnowledgeChunk chunk(Long documentId, int chunkIndex, String text) {
-        return new KnowledgeChunk(
-                documentId, "资料" + documentId, "note", null,
-                chunkIndex, text
-        );
+    private KnowledgeChunk chunk(Long id, int number, String text) {
+        return new KnowledgeChunk(id, "资料" + id, "note", null, number, text);
     }
 }

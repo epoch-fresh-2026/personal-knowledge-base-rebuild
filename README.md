@@ -26,7 +26,11 @@
 选择复习主题 → 基于知识库出题 → 作答与评分 → 错题重练 → 通过后移出错题
 ```
 
-入库任务会保存解析、索引阶段和数据库租约。服务异常退出后，过期任务会被重新领取并从最近的安全阶段继续执行；索引按资料 ID 替换，重复执行不会留下重复片段。
+入库任务会保存解析、索引阶段和数据库租约。独立心跳在处理期间续租；服务异常退出后，过期任务会被重新领取并从最近的安全阶段继续执行。解析和向量计算在事务外完成，正文或索引的最终提交先锁定任务行并检查有效租约，再与资料/任务状态一起提交或回滚；已被接手或取消的旧 Worker 不能写入迟到结果。
+
+所有资料处理都经过有界线程池。删除、编辑、替换和重试先锁定并失效旧任务，提交后才唤醒 Worker。索引按资料 ID 在事务中替换，并使用稳定分块 ID，恢复执行不会留下重复片段。模型调用可能重做，不保证只调用一次。
+
+默认租约为 15 分钟，心跳间隔为 30 秒，向量请求每批最多 32 个分块；配置位于 `app.ingestion`。心跳间隔必须小于租约时长，异常退出后的接手需要等待剩余租期。详细流程和测试说明见 [入库并发安全设计](docs/ingestion-safety.md)。
 
 ## 技术栈
 
@@ -101,6 +105,8 @@ mvn spring-boot:run
 
 ## 测试和打包
 
+完整验证需要 Docker Desktop（或可用的 Docker Engine）。`mvn verify` 会自动启动并清理隔离的 PostgreSQL/pgvector 测试容器，不读取 `.env`，不使用业务数据库或真实模型 API；Docker 不可用时集成测试会失败，不会静默跳过。
+
 ```powershell
 cd frontend
 npm ci
@@ -108,6 +114,14 @@ npm run build
 cd ..
 mvn verify
 ```
+
+只运行单元测试、不启动数据库容器：
+
+```powershell
+mvn test
+```
+
+真实数据库测试覆盖并发领取、跳过已锁任务、心跳续租、失效任务保护、索引与状态事务回滚、并发删除、编辑和文件替换失败。恢复测试会强制终止一个独立 JVM，再启动新 JVM，从持久化的 `INDEXING` 阶段继续并验证没有重复索引。这验证的是应用进程异常退出，不包含数据库磁盘损坏或原文件丢失。
 
 前端开发时也可以在 `frontend` 目录运行 `npm run dev`，然后访问 <http://localhost:5173>；Vite 会把 `/api` 请求转发到 8080 端口的 Spring Boot。GitHub Actions 会在创建 PR 和更新 `main` 时自动构建前端并执行后端测试。
 
@@ -141,6 +155,8 @@ mvn verify
 - [Vue 前端（Issue #74）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/74)
 - [知识自测（Issue #89）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/89)
 - [错题重练（Issue #91）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/91)
+- [可恢复入库（Issue #95）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/95)
+- [入库并发安全（Issue #97）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/97)
 - [工程支持（Issue #24）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/24)
 
 ## 密钥安全

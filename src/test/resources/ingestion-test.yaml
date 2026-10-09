@@ -1,0 +1,22 @@
+spring:
+  main:
+    banner-mode: "off"
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: update
+  ai:
+    model:
+      chat: none
+      embedding: none
+app:
+  ingestion:
+    lease-duration: 2s
+    heartbeat-interval: 100ms
+    embedding-batch-size: 2
+  chunk:
+    max-chars: 500
+    overlap-chars: 50
+logging:
+  level:
+    root: WARN
