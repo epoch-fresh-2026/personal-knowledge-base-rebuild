@@ -79,6 +79,7 @@ public class IngestionCommitter {
 
     @Transactional
     public boolean indexed(Long jobId, String owner, PreparedIndex prepared) {
+        //找到任务 → 锁住这条任务记录 → 检查提交者是否仍有资格。
         Optional<IngestionJob> owned = jobs.findOwnedForUpdate(jobId, owner);
         if (owned.isEmpty() || owned.get().getStage() != IngestionStage.INDEXING) {
             return false;

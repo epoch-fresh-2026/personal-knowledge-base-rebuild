@@ -76,7 +76,7 @@ class ProcessDocument {
 
     void process(IngestionJob job, String leaseOwner) {
         try (IngestionHeartbeat.Lease lease = heartbeat.watch(job.getId(), leaseOwner)) {
-                                 //取出任务对应的文档，标记为处理中
+                                 //取出任务对应的文档，document标记为处理中PROCESSING
             Document document = committer.start(job.getId(), leaseOwner).orElse(null);
             if (document == null || !lease.isValid()) {
                 return;

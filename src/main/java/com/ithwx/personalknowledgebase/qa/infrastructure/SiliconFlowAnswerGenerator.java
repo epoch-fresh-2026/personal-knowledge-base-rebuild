@@ -8,6 +8,8 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 @Component
 public class SiliconFlowAnswerGenerator implements AnswerGenerator {
@@ -26,7 +28,27 @@ public class SiliconFlowAnswerGenerator implements AnswerGenerator {
             List<ChatMessage> history,
             List<Evidence> evidence
     ) {
-        String prompt = """
+        return requireAnswer(chatModel.call(prompt(question, history, evidence)));
+    }
+
+    @Override
+    public String generateStreaming(String question, List<ChatMessage> history,
+                                    List<Evidence> evidence, Consumer<String> onDelta) {
+        StringBuilder answer = new StringBuilder();
+        // 使用模型的真实流式接口；退出时关闭订阅，避免继续消费已取消的回答。
+        try (Stream<String> chunks = chatModel.stream(prompt(question, history, evidence)).toStream(1)) {
+            chunks.forEachOrdered(text -> {
+                if (!text.isEmpty()) {
+                    onDelta.accept(text);
+                    answer.append(text);
+                }
+            });
+        }
+        return requireAnswer(answer.toString());
+    }
+
+    private String prompt(String question, List<ChatMessage> history, List<Evidence> evidence) {
+        return """
                 只能依据下面的知识库证据回答问题，不得编造信息。
                 使用 [证据 1] 这样的编号标明依据。
 
@@ -38,8 +60,9 @@ public class SiliconFlowAnswerGenerator implements AnswerGenerator {
                 知识库证据：
                 %s
                 """.formatted(formatHistory(history), question, formatEvidence(evidence));
+    }
 
-        String answer = chatModel.call(prompt);
+    private String requireAnswer(String answer) {
         if (answer == null || answer.isBlank()) {
             throw new IllegalStateException("回答模型没有返回内容");
         }
