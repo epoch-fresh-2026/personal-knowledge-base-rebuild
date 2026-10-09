@@ -2,6 +2,7 @@ package com.ithwx.personalknowledgebase.index.application;
 
 import com.ithwx.personalknowledgebase.index.domain.KnowledgeChunk;
 import com.ithwx.personalknowledgebase.index.domain.KnowledgeIndex;
+import com.ithwx.personalknowledgebase.index.domain.PreparedIndex;
 import com.ithwx.personalknowledgebase.index.infrastructure.TextChunker;
 import com.ithwx.personalknowledgebase.library.domain.DocumentDeleted;
 import com.ithwx.personalknowledgebase.library.domain.DocumentTextReady;
@@ -25,10 +26,13 @@ public class IndexDocument {
         this.knowledgeIndex = knowledgeIndex;
     }
 
-    public int index(DocumentTextReady document) {
+    public PreparedIndex prepare(DocumentTextReady document) {
         List<String> texts = textChunker.split(document.content());
-        knowledgeIndex.replace(document.documentId(), toChunks(document, texts));
-        return texts.size();
+        return knowledgeIndex.prepare(document.documentId(), toChunks(document, texts));
+    }
+
+    public void commit(PreparedIndex prepared) {
+        knowledgeIndex.replace(prepared);
     }
 
     @EventListener

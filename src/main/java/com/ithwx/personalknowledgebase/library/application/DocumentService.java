@@ -5,6 +5,7 @@ import com.ithwx.personalknowledgebase.library.domain.DocumentDeleted;
 import com.ithwx.personalknowledgebase.library.domain.DocumentRepository;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.util.List;
@@ -35,6 +36,7 @@ public class DocumentService {
         this.eventPublisher = eventPublisher;
     }
 
+    @Transactional(rollbackFor = IOException.class)
     public Document submitFile(
             String filename,
             byte[] content
@@ -45,6 +47,7 @@ public class DocumentService {
         return saveAndProcess(document);
     }
 
+    @Transactional
     public Document createNote(
             String title,
             String content
@@ -54,6 +57,7 @@ public class DocumentService {
         return saveAndProcess(document);
     }
 
+    @Transactional
     public Document collectWebPage(
             String url,
             String title
@@ -72,7 +76,9 @@ public class DocumentService {
         return requiredDocument(id);
     }
 
+    @Transactional
     public Document update(Long id, String name, String content) {
+        processDocument.cancel(id);
         Document document = requiredDocument(id);
         document.setName(name.strip());
         document.setContent(content);
@@ -80,8 +86,10 @@ public class DocumentService {
         return saveAndProcess(document);
     }
 
+    @Transactional(rollbackFor = IOException.class)
     public Document replaceFile(Long id, String filename, byte[] content) throws IOException {
         requireContent(content);
+        processDocument.cancel(id);
         Document document = requiredDocument(id);
         document.setName(filename);
         document.setFileType(fileType(filename));
@@ -92,13 +100,15 @@ public class DocumentService {
         return saveAndProcess(document);
     }
 
+    @Transactional
     public void delete(Long id) {
-        Document document = requiredDocument(id);
         processDocument.cancel(id);
+        Document document = requiredDocument(id);
         repository.delete(document);
         eventPublisher.publishEvent(new DocumentDeleted(id));
     }
 
+    @Transactional
     public Document retry(Long id) {
         return processDocument.retry(id);
     }

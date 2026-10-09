@@ -3,10 +3,11 @@ package com.ithwx.personalknowledgebase.library.infrastructure;
 import com.ithwx.personalknowledgebase.library.domain.IngestionJob;
 import com.ithwx.personalknowledgebase.library.domain.IngestionJobRepository;
 import com.ithwx.personalknowledgebase.library.domain.IngestionJobStatus;
-import com.ithwx.personalknowledgebase.library.domain.IngestionStage;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -23,8 +24,8 @@ public class JpaIngestionJobRepositoryAdapter implements IngestionJobRepository 
     @Override
     @Transactional
     public IngestionJob restart(Long documentId) {
-        ensureRow(documentId);
-        IngestionJob job = requiredByDocumentIdForUpdate(documentId);
+        ensureRow(documentId);//保证记录存在，没有就新增
+        IngestionJob job = requiredByDocumentIdForUpdate(documentId);//加锁读取这条记录，不存在就报错
         job.reset();
         return toDomain(jpaRepository.saveAndFlush(toEntity(job)));
     }
@@ -58,58 +59,40 @@ public class JpaIngestionJobRepositoryAdapter implements IngestionJobRepository 
     }
 
     @Override
-    @Transactional
-    public boolean advance(
-            Long jobId,
-            String leaseOwner,
-            IngestionStage stage,
-            LocalDateTime leaseUntil
-    ) {
-        IngestionJob job = requiredForUpdate(jobId);
-        if (!job.advance(leaseOwner, stage, leaseUntil)) {
-            return false;
-        }
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<IngestionJob> findOwnedForUpdate(Long jobId, String leaseOwner) {
+        return jpaRepository.findByIdForUpdate(jobId)
+                .map(this::toDomain)
+                .filter(job -> job.holdsLease(leaseOwner, LocalDateTime.now()));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void save(IngestionJob job) {
         jpaRepository.saveAndFlush(toEntity(job));
-        return true;
     }
 
     @Override
     @Transactional
-    public boolean complete(Long jobId, String leaseOwner) {
-        IngestionJob job = requiredForUpdate(jobId);
-        if (!job.complete(leaseOwner)) {
+    public boolean renew(Long jobId, String leaseOwner, Duration leaseDuration) {
+        Optional<IngestionJob> candidate = jpaRepository.findByIdForUpdate(jobId).map(this::toDomain);
+        LocalDateTime now = LocalDateTime.now();
+        if (candidate.isEmpty() || !candidate.get().renew(leaseOwner, now.plus(leaseDuration), now)) {
             return false;
         }
-        jpaRepository.saveAndFlush(toEntity(job));
-        return true;
-    }
-
-    @Override
-    @Transactional
-    public boolean fail(Long jobId, String leaseOwner, String reason) {
-        IngestionJob job = requiredForUpdate(jobId);
-        if (!job.fail(leaseOwner, reason)) {
-            return false;
-        }
-        jpaRepository.saveAndFlush(toEntity(job));
+        jpaRepository.saveAndFlush(toEntity(candidate.get()));
         return true;
     }
 
     @Override
     @Transactional
     public void cancelByDocumentId(Long documentId) {
+        ensureRow(documentId);
         jpaRepository.findByDocumentIdForUpdate(documentId).ifPresent(entity -> {
             IngestionJob job = toDomain(entity);
             job.cancel();
             jpaRepository.saveAndFlush(toEntity(job));
         });
-    }
-
-    private IngestionJob requiredForUpdate(Long jobId) {
-        return jpaRepository.findByIdForUpdate(jobId)
-                .map(this::toDomain)
-                .orElseThrow(() -> new NoSuchElementException(
-                        "入库任务不存在：" + jobId));
     }
 
     private void ensureRow(Long documentId) {

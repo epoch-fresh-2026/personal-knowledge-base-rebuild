@@ -7,9 +7,26 @@ import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.atomic.AtomicInteger;
+
 @Configuration
 @EnableScheduling
 class IngestionWorkerConfiguration {
+
+    @Bean(name = "ingestionHeartbeatScheduler", destroyMethod = "shutdownNow")
+    ScheduledExecutorService ingestionHeartbeatScheduler() {
+        AtomicInteger sequence = new AtomicInteger();
+        ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(2, runnable -> {
+            Thread thread = new Thread(runnable, "ingestion-heartbeat-" + sequence.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        });
+        scheduler.setRemoveOnCancelPolicy(true);
+        scheduler.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+        return scheduler;
+    }
 
     @Bean("ingestionTaskExecutor")
     TaskExecutor ingestionTaskExecutor(

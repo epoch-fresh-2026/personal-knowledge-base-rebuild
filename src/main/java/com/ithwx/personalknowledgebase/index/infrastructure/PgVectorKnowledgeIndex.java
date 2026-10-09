@@ -2,30 +2,45 @@ package com.ithwx.personalknowledgebase.index.infrastructure;
 
 import com.ithwx.personalknowledgebase.index.domain.KnowledgeChunk;
 import com.ithwx.personalknowledgebase.index.domain.KnowledgeIndex;
+import com.ithwx.personalknowledgebase.index.domain.PreparedIndex;
 import com.ithwx.personalknowledgebase.index.domain.SearchQuery;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.ai.vectorstore.filter.Filter;
-import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
+import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
+import java.util.StringJoiner;
 
 @Repository
 public class PgVectorKnowledgeIndex implements KnowledgeIndex {
 
     private final VectorStore vectorStore;
     private final JdbcTemplate jdbcTemplate;
+    private final EmbeddingModel embeddingModel;
+    private final int embeddingBatchSize;
 
-    public PgVectorKnowledgeIndex(VectorStore vectorStore, JdbcTemplate jdbcTemplate) {
+    public PgVectorKnowledgeIndex(VectorStore vectorStore, JdbcTemplate jdbcTemplate,
+                                  EmbeddingModel embeddingModel,
+                                  @Value("${app.ingestion.embedding-batch-size:32}") int embeddingBatchSize) {
         this.vectorStore = vectorStore;
         this.jdbcTemplate = jdbcTemplate;
+        this.embeddingModel = embeddingModel;
+        if (embeddingBatchSize < 1) {
+            throw new IllegalArgumentException("向量批大小必须为正数");
+        }
+        this.embeddingBatchSize = embeddingBatchSize;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -43,16 +58,45 @@ public class PgVectorKnowledgeIndex implements KnowledgeIndex {
     }
 
     @Override
-    public void replace(Long documentId, List<KnowledgeChunk> chunks) {
-        delete(documentId);
-        if (!chunks.isEmpty()) {
-            vectorStore.add(toVectorDocuments(chunks));
+    public PreparedIndex prepare(Long documentId, List<KnowledgeChunk> chunks) {
+        List<PreparedIndex.EmbeddedChunk> embedded = new ArrayList<>();
+        for (int start = 0; start < chunks.size(); start += embeddingBatchSize) {
+            List<KnowledgeChunk> batch = chunks.subList(start, Math.min(start + embeddingBatchSize, chunks.size()));
+            List<float[]> vectors = embeddingModel.embed(batch.stream().map(KnowledgeChunk::text).toList());
+            if (vectors.size() != batch.size()) {
+                throw new IllegalStateException("向量模型返回的数量与分块数量不一致");
+            }
+            for (int index = 0; index < batch.size(); index++) {
+                embedded.add(new PreparedIndex.EmbeddedChunk(batch.get(index), vectors.get(index)));
+            }
+        }
+        return new PreparedIndex(documentId, embedded);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void replace(PreparedIndex prepared) {
+        delete(prepared.documentId());
+        // 只写已计算的向量，与任务/资料状态共享同一个 PostgreSQL 事务。
+        for (PreparedIndex.EmbeddedChunk embedded : prepared.chunks()) {
+            KnowledgeChunk chunk = embedded.chunk();
+            UUID id = UUID.nameUUIDFromBytes((chunk.documentId() + ":" + chunk.chunkIndex())
+                    .getBytes(StandardCharsets.UTF_8));
+            jdbcTemplate.update("""
+                    INSERT INTO vector_store (id, content, metadata, embedding)
+                    VALUES (?, ?, jsonb_strip_nulls(jsonb_build_object(
+                        'documentId', CAST(? AS text), 'documentName', CAST(? AS text),
+                        'sourceType', CAST(? AS text), 'sourceUrl', CAST(? AS text),
+                        'chunkIndex', CAST(? AS integer))), CAST(? AS vector))
+                    """, id, chunk.text(), String.valueOf(chunk.documentId()), chunk.documentName(),
+                    chunk.sourceType(), chunk.sourceUrl(), chunk.chunkIndex(), vectorLiteral(embedded.embedding()));
         }
     }
 
     @Override
+    @Transactional
     public void delete(Long documentId) {
-        vectorStore.delete(documentFilter(documentId));
+        jdbcTemplate.update("DELETE FROM vector_store WHERE metadata ->> 'documentId' = ?", String.valueOf(documentId));
     }
 
     private List<KnowledgeChunk> vectorSearch(SearchQuery query) {
@@ -121,31 +165,12 @@ public class PgVectorKnowledgeIndex implements KnowledgeIndex {
         }
     }
 
-    private Filter.Expression documentFilter(Long documentId) {
-        return new FilterExpressionBuilder()
-                .eq("documentId", String.valueOf(documentId))
-                .build();
-    }
-
-    private List<org.springframework.ai.document.Document> toVectorDocuments(
-            List<KnowledgeChunk> chunks
-    ) {
-        List<org.springframework.ai.document.Document> documents = new ArrayList<>();
-        for (KnowledgeChunk chunk : chunks) {
-            Map<String, Object> metadata = new LinkedHashMap<>();
-            metadata.put("documentId", String.valueOf(chunk.documentId()));
-            metadata.put("documentName", chunk.documentName());
-            metadata.put("sourceType", chunk.sourceType());
-            metadata.put("chunkIndex", chunk.chunkIndex());
-            if (chunk.sourceUrl() != null) {
-                metadata.put("sourceUrl", chunk.sourceUrl());
-            }
-            documents.add(org.springframework.ai.document.Document.builder()
-                    .text(chunk.text())
-                    .metadata(metadata)
-                    .build());
+    private String vectorLiteral(float[] vector) {
+        StringJoiner values = new StringJoiner(",", "[", "]");
+        for (float value : vector) {
+            values.add(Float.toString(value));
         }
-        return documents;
+        return values.toString();
     }
 
 }
