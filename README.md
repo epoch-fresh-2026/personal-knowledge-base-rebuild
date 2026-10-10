@@ -10,7 +10,7 @@
 - 录入学习笔记和公开参考网页
 - 文本切分、向量化和 pgvector 存储
 - 资料查询、修改、替换和删除
-- 混合检索、模型重排、Agent 按需二次检索、无依据拒答和来源追踪
+- 向量与关键词检索、RRF 排名融合、模型重排、Agent 按需二次检索、无依据拒答和来源追踪
 - 问答会话保存与刷新恢复
 - 流式显示回答、检索阶段提示和停止生成
 - 资料管理、知识问答和知识自测页面
@@ -21,11 +21,15 @@
 ```text
 上传资料 → 创建持久化入库任务 → 解析与验重 → 文本切分 → 建立索引 → 资料变为 READY
 
-用户提问 → 混合检索 → 模型重排 → Agent 判断证据
+用户提问 → 向量与关键词检索 → RRF 融合并限制候选 → 模型重排 → Agent 判断证据
         → 必要时改写问题并再次检索 → 回答或拒答 → 保存会话
 
 选择复习主题 → 基于知识库出题 → 作答与评分 → 错题重练 → 通过后移出错题
 ```
+
+检索的两路结果用 RRF（Reciprocal Rank Fusion）融合：每路命中的片段贡献 `1 / (60 + 排名)`，排名从 1 开始，同一片段命中两路时累加贡献。按 `documentId + chunkIndex` 去重，同一路重复片段只计一次，并按去重后的排名计分；同分时按资料 ID、分块序号排序。它使用排名，不直接相加向量相似度与关键词相似度。[算法参考](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf)。
+
+每路最多取 `top-k × 2` 个候选，融合后也只保留 `top-k × 2` 个，再送给原有模型重排序。默认 `top-k=5`，因此重排序最多接收 10 个片段，而不是原来的两路合并后最多 20 个。RRF 分数只用于候选筛选；最终 `SearchResult.score` 仍是模型重排序的相关性分数。融合不增加模型调用，不改变问答接口、引用来源和上下文长度限制；是否改善真实回答质量仍需另外评测。
 
 入库任务会保存解析、索引阶段和数据库租约。独立心跳在处理期间续租；服务异常退出后，过期任务会被重新领取并从最近的安全阶段继续执行。解析和向量计算在事务外完成，正文或索引的最终提交先锁定任务行并检查有效租约，再与资料/任务状态一起提交或回滚；已被接手或取消的旧 Worker 不能写入迟到结果。
 
@@ -131,6 +135,8 @@ mvn test
 
 流式测试覆盖模型流逐段转发、订阅取消、SSE 超时、单请求执行与不排队、完整回答保存，以及前端汉字分块解码、提前显示、异常和停止生成。使用测试模型，不消耗真实 API Token。
 
+检索融合测试覆盖两路排名累计、跨路与单路去重、单路或空结果、同分排序、候选上限、实际检索接线，以及最终分数仍来自模型重排序。
+
 前端开发时也可以在 `frontend` 目录运行 `npm run dev`，然后访问 <http://localhost:5173>；Vite 会把 `/api` 请求转发到 8080 端口的 Spring Boot。GitHub Actions 会在创建 PR 和更新 `main` 时自动执行前端测试、构建前端并执行后端测试。
 
 ## 主要接口
@@ -167,6 +173,7 @@ mvn test
 - [可恢复入库（Issue #95）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/95)
 - [入库并发安全（Issue #97）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/97)
 - [流式问答与阶段提示（Issue #100）](https://github.com/epoch-fresh-2026/personal-knowledge-base-rebuild/issues/100)
+- [检索结果 RRF 融合（Issue #102）](https://github.com/epoch-fresh-2026/personal-knowledge-base-rebuild/issues/102)
 - [工程支持（Issue #24）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/24)
 
 ## 密钥安全

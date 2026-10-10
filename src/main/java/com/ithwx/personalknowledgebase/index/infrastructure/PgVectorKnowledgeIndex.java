@@ -16,15 +16,20 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.StringJoiner;
 
 @Repository
 public class PgVectorKnowledgeIndex implements KnowledgeIndex {
+
+    private static final int RRF_K = 60;
 
     private final VectorStore vectorStore;
     private final JdbcTemplate jdbcTemplate;
@@ -54,7 +59,7 @@ public class PgVectorKnowledgeIndex implements KnowledgeIndex {
 
     @Override
     public List<KnowledgeChunk> search(SearchQuery query) {
-        return merge(vectorSearch(query), keywordSearch(query));
+        return fuse(vectorSearch(query), keywordSearch(query), query.candidateLimit());
     }
 
     @Override
@@ -145,24 +150,43 @@ public class PgVectorKnowledgeIndex implements KnowledgeIndex {
         );
     }
 
-    List<KnowledgeChunk> merge(
+    List<KnowledgeChunk> fuse(
             List<KnowledgeChunk> vectorResults,
-            List<KnowledgeChunk> keywordResults
+            List<KnowledgeChunk> keywordResults,
+            int candidateLimit
     ) {
-        Map<String, KnowledgeChunk> uniqueChunks = new LinkedHashMap<>();
-        addUnique(vectorResults, uniqueChunks);
-        addUnique(keywordResults, uniqueChunks);
-        return List.copyOf(uniqueChunks.values());
+        Map<String, FusedChunk> fused = new LinkedHashMap<>();
+        for (List<KnowledgeChunk> results : List.of(vectorResults, keywordResults)) {
+            Set<String> seen = new HashSet<>();
+            int rank = 0;
+            for (KnowledgeChunk chunk : results) {
+                String key = chunk.documentId() + ":" + chunk.chunkIndex();
+                // 同一路重复片段只计一次，去重后从第 1 名开始排名。
+                if (!seen.add(key)) {
+                    continue;
+                }
+                rank++;
+                // 按排名计分，不直接相加两路含义不同的原始相似度。
+                double score = 1.0 / (RRF_K + rank);
+                FusedChunk previous = fused.get(key);
+                if (previous != null) {
+                    score += previous.rrfScore();
+                    chunk = previous.chunk();
+                }
+                fused.put(key, new FusedChunk(chunk, score));
+            }
+        }
+        // 同分时固定顺序；截断后才交给现有模型重排序，控制候选数量。
+        return fused.values().stream()
+                .sorted(Comparator.comparingDouble(FusedChunk::rrfScore).reversed()
+                        .thenComparing(result -> result.chunk().documentId())
+                        .thenComparingInt(result -> result.chunk().chunkIndex()))
+                .limit(candidateLimit)
+                .map(FusedChunk::chunk)
+                .toList();
     }
 
-    private void addUnique(
-            List<KnowledgeChunk> candidates,
-            Map<String, KnowledgeChunk> uniqueChunks
-    ) {
-        for (KnowledgeChunk chunk : candidates) {
-            String key = chunk.documentId() + ":" + chunk.chunkIndex();
-            uniqueChunks.putIfAbsent(key, chunk);
-        }
+    private record FusedChunk(KnowledgeChunk chunk, double rrfScore) {
     }
 
     private String vectorLiteral(float[] vector) {

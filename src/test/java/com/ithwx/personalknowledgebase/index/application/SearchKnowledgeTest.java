@@ -68,6 +68,21 @@ class SearchKnowledgeTest {
         verify(knowledgeReranker, never()).rerank(anyString(), anyList(), anyInt());
     }
 
+    @Test
+    void shouldRerankFusedCandidatesAndKeepModelScoreAsFinalScore() {
+        SearchKnowledge service = new SearchKnowledge(knowledgeIndex, knowledgeReranker, 1, 3000, 0.55);
+        KnowledgeChunk fusedFirst = chunk(1L, "两路命中");
+        KnowledgeChunk fusedSecond = chunk(2L, "单路命中");
+        List<KnowledgeChunk> fused = List.of(fusedFirst, fusedSecond);
+        when(knowledgeIndex.search(any())).thenReturn(fused);
+        // 融合只负责候选筛选，最终顺序和 score 仍以模型重排序为准。
+        when(knowledgeReranker.rerank("事务", fused, 1))
+                .thenReturn(List.of(new SearchResult(fusedSecond, 0.92)));
+
+        assertEquals(List.of(new SearchResult(fusedSecond, 0.92)), service.search("事务"));
+        verify(knowledgeReranker).rerank("事务", fused, 1);
+    }
+
     private SearchResult result(Long documentId, String text, double score) {
         return new SearchResult(chunk(documentId, text), score);
     }
