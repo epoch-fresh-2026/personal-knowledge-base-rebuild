@@ -1,6 +1,7 @@
 package com.ithwx.personalknowledgebase.controller;
 
 import com.ithwx.personalknowledgebase.library.application.DocumentService;
+import com.ithwx.personalknowledgebase.controller.dto.DocumentSummaryResponse;
 import com.ithwx.personalknowledgebase.controller.dto.DocumentDetailResponse;
 import com.ithwx.personalknowledgebase.controller.dto.DocumentResponse;
 import com.ithwx.personalknowledgebase.controller.dto.DocumentUpdateRequest;
@@ -63,6 +64,17 @@ public class DocumentController {
     @GetMapping("/{id}")
     public DocumentDetailResponse detail(@PathVariable Long id) {
         return DocumentDetailResponse.from(service.get(id));
+    }
+
+    @GetMapping("/{id}/summary")
+    public DocumentSummaryResponse summary(@PathVariable Long id) {
+        return DocumentSummaryResponse.from(service.get(id));
+    }
+
+    @PostMapping("/{id}/summary")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public DocumentSummaryResponse retrySummary(@PathVariable Long id) {
+        return DocumentSummaryResponse.from(service.retrySummary(id));
     }
 
     @PutMapping(value = "/{id}", consumes = MediaType.APPLICATION_JSON_VALUE)

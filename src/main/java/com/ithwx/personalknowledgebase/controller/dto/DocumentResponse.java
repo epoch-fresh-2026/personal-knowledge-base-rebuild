@@ -13,6 +13,7 @@ public record DocumentResponse(
         String status,
         Integer chunkCount,
         String failureReason,
+        String summaryStatus,
         LocalDateTime uploadTime
 ) {
     public static DocumentResponse from(Document document) {
@@ -25,6 +26,7 @@ public record DocumentResponse(
                 document.getStatus(),
                 document.getChunkCount(),
                 document.getFailureReason(),
+                document.getSummaryStatus(),
                 document.getUploadTime()
         );
     }

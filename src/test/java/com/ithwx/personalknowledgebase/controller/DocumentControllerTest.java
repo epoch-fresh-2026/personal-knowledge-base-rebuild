@@ -45,6 +45,28 @@ class DocumentControllerTest {
     }
 
     @Test
+    void shouldReadSavedSummaryAndQueueRetry() throws Exception {
+        Document saved = document(1L, "事务笔记", "note");
+        saved.completeSummary("事务保证操作作为一个整体完成。");
+        when(service.get(1L)).thenReturn(saved);
+        mockMvc.perform(get("/api/documents/1/summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.summary").value("事务保证操作作为一个整体完成。"))
+                .andExpect(jsonPath("$.status").value("READY"));
+
+        saved.prepareSummary();
+        when(service.retrySummary(1L)).thenReturn(saved);
+        mockMvc.perform(post("/api/documents/1/summary"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("PENDING"));
+
+        when(service.retrySummary(2L)).thenThrow(new IllegalArgumentException("请等待资料完成解析与索引后再总结"));
+        mockMvc.perform(post("/api/documents/2/summary"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("请等待资料完成解析与索引后再总结"));
+    }
+
+    @Test
     void shouldUploadFile() throws Exception {
         MockMultipartFile file = new MockMultipartFile(
                 "file", "资料.txt", "text/plain",

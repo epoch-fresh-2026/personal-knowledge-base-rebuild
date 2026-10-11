@@ -45,7 +45,11 @@ public class IngestionCommitter {
             jobs.save(owned.get());
             return Optional.empty();
         }
-        document.get().startProcessing();
+        if (owned.get().getStage() == IngestionStage.SUMMARIZING) {
+            document.get().startSummary();
+        } else {
+            document.get().startProcessing();
+        }
         return Optional.of(documents.save(document.get()));
     }
 
@@ -88,12 +92,32 @@ public class IngestionCommitter {
         if (!job.getDocumentId().equals(prepared.documentId())) {
             throw new IllegalArgumentException("索引结果与任务资料不一致");
         }
-        if (!job.complete(owner, LocalDateTime.now())) {
+        LocalDateTime now = LocalDateTime.now();
+        if (!job.advance(owner, IngestionStage.SUMMARIZING, now.plus(leaseDuration), now)) {
             return false;
         }
         Document document = documents.findById(job.getDocumentId()).orElseThrow();
         indexDocument.commit(prepared);
         document.markReady(prepared.chunks().size());
+        document.startSummary();
+        documents.save(document);
+        jobs.save(job);
+        return true;
+    }
+
+    @Transactional
+    public boolean summarized(Long jobId, String owner, String summary) {
+        Optional<IngestionJob> owned = jobs.findOwnedForUpdate(jobId, owner);
+        if (owned.isEmpty() || owned.get().getStage() != IngestionStage.SUMMARIZING) {
+            return false;
+        }
+        IngestionJob job = owned.get();
+        if (!job.complete(owner, LocalDateTime.now())) {
+            return false;
+        }
+        // 和索引一样，先验证任务身份，再写入；删改后的旧结果不会写回。
+        Document document = documents.findById(job.getDocumentId()).orElseThrow();
+        document.completeSummary(summary);
         documents.save(document);
         jobs.save(job);
         return true;
@@ -106,8 +130,12 @@ public class IngestionCommitter {
             return;
         }
         documents.findById(owned.get().getDocumentId()).ifPresent(document -> {
-            document.setContentHash(null);
-            document.markFailed(reason);
+            if (owned.get().getStage() == IngestionStage.SUMMARIZING) {
+                document.failSummary(reason);
+            } else {
+                document.setContentHash(null);
+                document.markFailed(reason);
+            }
             documents.save(document);
         });
         jobs.save(owned.get());

@@ -1,6 +1,9 @@
 spring:
   main:
     banner-mode: "off"
+  sql:
+    init:
+      mode: always
   jpa:
     open-in-view: false
     hibernate:

@@ -3,6 +3,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.util.NoSuchElementException;
 
@@ -33,6 +34,18 @@ class GlobalExceptionHandlerTest {
 
         assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
         assertEquals("NOT_FOUND", response.getBody().code());
+    }
+
+    @Test
+    void shouldReportFileSizeLimitInChinese() {
+        ResponseEntity<ApiErrorResponse> response = handler.handleFileTooLarge(
+                new MaxUploadSizeExceededException(20 * 1024 * 1024),
+                request("/api/documents")
+        );
+
+        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, response.getStatusCode());
+        assertEquals("FILE_TOO_LARGE", response.getBody().code());
+        assertEquals("文件超过上传大小限制，请缩小文件后重试", response.getBody().message());
     }
 
     @Test

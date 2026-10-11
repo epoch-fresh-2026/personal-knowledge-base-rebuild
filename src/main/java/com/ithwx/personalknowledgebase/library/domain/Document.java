@@ -19,6 +19,9 @@ public class Document {
     private String sourceUrl;
     private String contentHash;
     private String content;
+    private String summary;
+    private String summaryStatus;
+    private String summaryFailureReason;
     private String failureReason;
     private LocalDateTime uploadTime;
     private String status;
@@ -29,6 +32,30 @@ public class Document {
         status = DocumentStatus.PENDING.name();
         chunkCount = 0;
         failureReason = null;
+        prepareSummary();
+    }
+
+    public void prepareSummary() {
+        summary = null;
+        summaryStatus = "PENDING";
+        summaryFailureReason = null;
+    }
+
+    public void startSummary() {
+        summaryStatus = "PROCESSING";
+        summaryFailureReason = null;
+    }
+
+    public void completeSummary(String text) {
+        summary = text;
+        summaryStatus = "READY";
+        summaryFailureReason = null;
+    }
+
+    public void failSummary(String reason) {
+        summary = null;
+        summaryStatus = "FAILED";
+        summaryFailureReason = reason;
     }
 
     public void startProcessing() {

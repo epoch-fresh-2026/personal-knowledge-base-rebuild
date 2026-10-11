@@ -15,7 +15,7 @@ public class IngestionJob {
     private Long id;
     private Long version;
     private Long documentId;
-    private IngestionStage stage;//提取中，索引中，完成
+    private IngestionStage stage;//提取中，索引中，总结中，完成
     private IngestionJobStatus status;//待处理，运行中，已完成，失败，已取消
     private int attemptCount;
     private String leaseOwner;
@@ -32,7 +32,11 @@ public class IngestionJob {
     }
 
     public void reset() {
-        stage = IngestionStage.EXTRACTING;
+        reset(IngestionStage.EXTRACTING);
+    }
+
+    public void reset(IngestionStage nextStage) {
+        stage = nextStage;
         status = IngestionJobStatus.PENDING;
         leaseOwner = null;
         leaseUntil = null;

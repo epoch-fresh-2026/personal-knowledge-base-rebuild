@@ -11,6 +11,8 @@ public interface DocumentRepository {
 
     Optional<Document> findById(Long id);
 
+    List<Document> findByIds(List<Long> ids);
+
     boolean existsByContentHash(String hash);
 
     boolean existsOtherWithHash(String hash, Long documentId);

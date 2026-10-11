@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {streamChat} from "./api.js";
+import {request, streamChat} from "./api.js";
 
 const encoder = new TextEncoder();
 const answer = {conversationId: 7, answer: "你好\n世界", sources: [], refused: false};
@@ -12,6 +12,34 @@ function event(name, data, newline = "\n") {
 function response(stream) {
     return new Response(stream, {headers: {"Content-Type": "text/event-stream;charset=UTF-8"}});
 }
+
+test("request reports network failures in Chinese", async t => {
+    t.mock.method(globalThis, "fetch", async () => { throw new TypeError("Failed to fetch"); });
+    await assert.rejects(request("/api/documents"), /无法连接服务器，请检查服务和网络后重试/);
+});
+
+test("request reports oversized uploads in Chinese even when response is not JSON", async t => {
+    const fetch = t.mock.method(globalThis, "fetch", async () => new Response("Request too large", {status: 413}));
+    await assert.rejects(request("/api/documents"), /文件超过上传大小限制/);
+    fetch.mock.mockImplementation(async () => Response.json({message: "文件超过上传大小限制"}, {status: 413}));
+    await assert.rejects(request("/api/documents"), /文件超过上传大小限制/);
+});
+
+test("request preserves backend messages and translates non-JSON responses", async t => {
+    const fetch = t.mock.method(globalThis, "fetch", async () => Response.json({message: "服务器内部错误"}, {status: 500}));
+    await assert.rejects(request("/api/documents/1/summary"), /服务器内部错误/);
+    fetch.mock.mockImplementation(async () => new Response("<html>Error</html>", {status: 502}));
+    await assert.rejects(request("/api/documents"), /服务器响应格式不正确（502）/);
+    fetch.mock.mockImplementation(async () => Response.json({}, {status: 500}));
+    await assert.rejects(request("/api/documents"), /请求失败（500）/);
+});
+
+test("request still returns JSON and accepts empty successful responses", async t => {
+    const fetch = t.mock.method(globalThis, "fetch", async () => Response.json({id: 1}));
+    assert.deepEqual(await request("/api/documents"), {id: 1});
+    fetch.mock.mockImplementation(async () => new Response(null, {status: 204}));
+    assert.equal(await request("/api/documents/1", {method: "DELETE"}), undefined);
+});
 
 test("handles Chinese characters and SSE boundaries split into single bytes", async t => {
     const bytes = encoder.encode(": comment\r\n\r\n"

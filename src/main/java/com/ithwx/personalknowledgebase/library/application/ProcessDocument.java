@@ -39,6 +39,7 @@ class ProcessDocument {
     private final Duration leaseDuration;
     private final IngestionCommitter committer;
     private final IngestionHeartbeat heartbeat;
+    private final SummarizeDocument summarizer;
     private final String instanceId = UUID.randomUUID().toString();
 
     ProcessDocument(
@@ -49,7 +50,8 @@ class ProcessDocument {
             @Qualifier("ingestionTaskExecutor") TaskExecutor taskExecutor,
             @Value("${app.ingestion.lease-duration:15m}") Duration leaseDuration,
             IngestionCommitter committer,
-            IngestionHeartbeat heartbeat
+            IngestionHeartbeat heartbeat,
+            SummarizeDocument summarizer
     ) {
         this.documentRepository = documentRepository;
         this.jobRepository = jobRepository;
@@ -59,6 +61,7 @@ class ProcessDocument {
         this.leaseDuration = leaseDuration;
         this.committer = committer;
         this.heartbeat = heartbeat;
+        this.summarizer = summarizer;
     }
 
     public void processAsync(Long documentId) {
@@ -93,12 +96,18 @@ class ProcessDocument {
                     return;
                 }
             }
-            if (lease.isValid()) {
+            if (job.getStage() != IngestionStage.SUMMARIZING && lease.isValid()) {
                                           //切分正文、计算向量，得到准备好的索引数据
                 PreparedIndex prepared = indexDocument.prepare(toTextReady(document));
+                if (!lease.isValid() || !committer.indexed(job.getId(), leaseOwner, prepared)) {
+                    return;
+                }
+            }
+            if (lease.isValid()) {
+                // 索引已经可用；模型调用仍在事务外执行，失败只影响摘要。
+                String summary = summarizer.summarize(document.getContent());
                 if (lease.isValid()) {
-                    //保存索引，标记文档可用、任务完成
-                    committer.indexed(job.getId(), leaseOwner, prepared);
+                    committer.summarized(job.getId(), leaseOwner, summary);
                 }
             }
         } catch (Exception exception) {
@@ -120,6 +129,21 @@ class ProcessDocument {
 
     void cancel(Long documentId) {
         jobRepository.cancelByDocumentId(documentId);
+    }
+
+    Document retrySummary(Long id) {
+        // 先锁任务，沿用删除、替换时的锁顺序；只重试摘要，不重建索引。
+        jobRepository.restartSummary(id);
+        Document document = requiredDocument(id);
+        if (!"READY".equals(document.getStatus())) {
+            throw new IllegalArgumentException("请等待资料完成解析与索引后再总结");
+        }
+        if (!"PENDING".equals(document.getSummaryStatus()) && !"PROCESSING".equals(document.getSummaryStatus())) {
+            document.prepareSummary();
+            document = documentRepository.save(document);
+        }
+        triggerWorker();
+        return document;
     }
 
     @EventListener(ApplicationReadyEvent.class)

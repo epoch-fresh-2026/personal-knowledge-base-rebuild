@@ -9,15 +9,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Locale;
 import java.util.NoSuchElementException;
-import java.util.Set;
+
+import static com.ithwx.personalknowledgebase.library.infrastructure.DocumentFileParser.fileType;
 
 @Service
 public class DocumentService {
-
-    private static final Set<String> SUPPORTED_FILE_TYPES =
-            Set.of("txt", "md", "markdown", "pdf", "docx");
 
     private final DocumentRepository repository;
     private final FileStorage fileStorage;
@@ -113,6 +110,11 @@ public class DocumentService {
         return processDocument.retry(id);
     }
 
+    @Transactional
+    public Document retrySummary(Long id) {
+        return processDocument.retrySummary(id);
+    }
+
     private Document pending(String name, String type) {
         Document document = new Document();
         document.setName(name.strip());
@@ -142,15 +144,4 @@ public class DocumentService {
         }
     }
 
-    private String fileType(String filename) {
-        int dot = filename == null ? -1 : filename.lastIndexOf('.');
-        if (dot < 0 || dot == filename.length() - 1) {
-            throw new IllegalArgumentException("无法识别文件格式");
-        }
-        String type = filename.substring(dot + 1).toLowerCase(Locale.ROOT);
-        if (!SUPPORTED_FILE_TYPES.contains(type)) {
-            throw new IllegalArgumentException("不支持的文件格式：" + type);
-        }
-        return type;
-    }
 }

@@ -20,6 +20,7 @@
     <properties>
         <java.version>17</java.version>
         <spring-ai.version>2.0.1</spring-ai.version>
+        <tika.version>3.3.2</tika.version>
     </properties>
 
     <dependencyManagement>
@@ -71,14 +72,14 @@
             <optional>true</optional>
         </dependency>
         <dependency>
-            <groupId>org.apache.pdfbox</groupId>
-            <artifactId>pdfbox</artifactId>
-            <version>3.0.3</version>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-core</artifactId>
+            <version>${tika.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.apache.poi</groupId>
-            <artifactId>poi-ooxml</artifactId>
-            <version>5.4.0</version>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-parsers-standard-package</artifactId>
+            <version>${tika.version}</version>
         </dependency>
         <dependency>
             <groupId>org.jsoup</groupId>

@@ -32,12 +32,12 @@
                     <div class="tab-panel" :class="{active: activeTab === 'file'}" v-show="activeTab === 'file'">
                         <form ref="fileForm" @submit.prevent="uploadFile">
                             <label class="drop-zone" for="file-input">
-                                <input id="file-input" name="file" type="file" accept=".txt,.md,.markdown,.pdf,.docx" required @change="selectFile">
+                                <input id="file-input" name="file" type="file" :accept="fileAccept" required @change="selectFile">
                                 <span class="upload-symbol">↑</span>
                                 <strong>{{ fileName || "拖放文件到这里，或点击选择" }}</strong>
-                                <span>支持 TXT、Markdown、PDF、DOCX</span>
+                                <span>支持 Word、PPT、Excel、PDF、Markdown 等文字文档（不含 OCR）</span>
                             </label>
-                            <div class="form-actions"><span class="form-hint">文件会被自动解析并生成向量索引</span>
+                            <div class="form-actions"><span class="form-hint">单个文件最大 20MB，上传后自动解析、建立索引并生成摘要</span>
                                 <button class="primary-button" type="submit" :disabled="submitting">上传并入库</button></div>
                         </form>
                     </div>
@@ -76,6 +76,8 @@
                         <div class="document-card-head">
                             <span class="type-badge">{{ typeInfo(item)[0] }}</span>
                             <div class="document-actions">
+                                <button v-if="item.status === 'READY'" type="button" title="总结资料"
+                                        @click="summarizeDocument(item)">{{ ['PENDING', 'PROCESSING'].includes(item.summaryStatus) ? "总结中…" : "查看总结" }}</button>
                                 <button v-if="item.status === 'FAILED'" type="button" title="重新处理" @click="retryDocument(item)">↻</button>
                                 <button v-if="item.fileType === 'note'" type="button" title="修改笔记" @click="openNoteEditor(item)">✎</button>
                                 <button v-if="isFile(item)" type="button" title="替换文件" @click="openFileDialog(item)">↥</button>
@@ -119,8 +121,8 @@
 
         <dialog class="confirm-dialog edit-dialog" ref="fileDialog">
             <form ref="replaceForm" class="stacked-form" @submit.prevent="replaceFile">
-                <h2>替换文件</h2><p>为“<strong>{{ selectedDocument ? selectedDocument.name : "" }}</strong>”选择一个新文件，原有向量索引会被同步替换。</p>
-                <label><span>新文件</span><input name="file" type="file" accept=".txt,.md,.markdown,.pdf,.docx" required></label>
+                <h2>替换文件</h2><p>为“<strong>{{ selectedDocument ? selectedDocument.name : "" }}</strong>”选择一个新文件（最大 20MB），原有向量索引会被同步替换。</p>
+                <label><span>新文件</span><input name="file" type="file" :accept="fileAccept" required></label>
                 <div class="dialog-actions">
                     <button class="ghost-button" type="button" @click="$refs.fileDialog.close()">取消</button>
                     <button class="primary-button" type="submit">确认替换</button>
@@ -128,16 +130,40 @@
             </form>
         </dialog>
 
+        <dialog class="confirm-dialog edit-dialog summary-dialog" ref="summaryDialog">
+            <h2>文档总结</h2><p>{{ summaryDocument?.name }}</p>
+            <p v-if="currentSummary?.loading" role="status">正在读取已保存的总结……</p>
+            <p v-else-if="['PENDING', 'PROCESSING'].includes(currentSummary?.status)" role="status">后台正在总结完整正文，完成后会自动显示。可以关闭窗口，继续查看其他资料。</p>
+            <p v-else-if="currentSummary?.error" class="document-error" role="alert">{{ currentSummary.error }}</p>
+            <div v-else-if="currentSummary?.text" class="summary-content markdown-answer"
+                 v-html="renderMarkdown(currentSummary.text)"></div>
+            <p v-else-if="currentSummary">这份资料还没有摘要，点击下方按钮在后台生成。</p>
+            <p v-else-if="summaryDocument" class="document-error" role="alert">资料已删除或更新，请重新选择资料。</p>
+            <p class="form-hint">模型总结仅供参考，请结合原文核对。摘要保存在数据库中，不覆盖原文或写入向量索引。</p>
+            <div class="dialog-actions">
+                <button class="ghost-button" type="button" @click="$refs.summaryDialog.close()">关闭</button>
+                <button v-if="currentSummary && !currentSummary.loading && !currentSummary.status && !currentSummary.error" class="primary-button" type="button"
+                        @click="retrySummary(summaryDocument)">生成摘要</button>
+                <button v-else-if="currentSummary?.status === 'FAILED'" class="primary-button" type="button"
+                        @click="retrySummary(summaryDocument)">重试总结</button>
+                <button v-else-if="currentSummary?.error" class="primary-button" type="button"
+                        @click="loadSummary(summaryDocument)">重新读取</button>
+            </div>
+        </dialog>
+
         <div class="toast" :class="[toast.error ? 'error' : 'success', {visible: toast.visible}]" role="status">{{ toast.message }}</div>
     </div>
 </template>
 
 <script>
+import DOMPurify from "dompurify";
+import {marked} from "marked";
 import AppHeader from "./AppHeader.vue";
 import {jsonRequest, request} from "./api.js";
 
 const API = "/api/documents";
-const FILE_TYPES = ["txt", "md", "markdown", "pdf", "docx"];
+const FILE_TYPES = ["txt", "md", "markdown", "pdf", "doc", "docx", "ppt", "pptx",
+    "xls", "xlsx", "csv", "tsv", "html", "htm", "rtf", "odt", "ods", "odp", "epub"];
 const TYPE_INFO = {
     txt: ["TXT", "#287f96"],
     md: ["MARKDOWN", "#765aa3"],
@@ -173,12 +199,20 @@ export default {
             link: {url: "", title: ""},
             editNote: {name: "", content: ""},
             selectedDocument: null,
+            summaryDocument: null,
+            summaries: {},
             toast: {visible: false, error: false, message: ""},
             refreshTimer: null,
             toastTimer: null
         };
     },
     computed: {
+        currentSummary() {
+            return this.summaries[this.summaryDocument?.id];
+        },
+        fileAccept() {
+            return FILE_TYPES.map(type => `.${type}`).join(",");
+        },
         readyCount() {
             return this.documents.filter(item => item.status === "READY").length;
         },
@@ -195,6 +229,40 @@ export default {
         clearTimeout(this.toastTimer);
     },
     methods: {
+        async summarizeDocument(item) {
+            this.summaryDocument = item;
+            this.$refs.summaryDialog.showModal();
+            await this.loadSummary(item);
+        },
+        async loadSummary(item) {
+            const previous = this.summaries[item.id];
+            if (previous?.loading && previous.version === item.version) return;
+
+            this.summaries[item.id] = {version: item.version, loading: true, status: item.summaryStatus, text: "", error: ""};
+            // 从 Vue 取回响应式对象；各请求只更新自己的资料，不覆盖当前打开的其他资料。
+            const summary = this.summaries[item.id];
+            try {
+                const result = await request(`${API}/${item.id}/summary`);
+                summary.text = result.summary;
+                summary.status = result.status;
+                summary.error = result.failureReason || "";
+            } catch (error) {
+                summary.error = error.message;
+            } finally {
+                summary.loading = false;
+            }
+        },
+        async retrySummary(item) {
+            try {
+                await request(`${API}/${item.id}/summary`, {method: "POST"});
+                await this.loadDocuments();
+            } catch (error) {
+                this.showToast(error.message, true);
+            }
+        },
+        renderMarkdown(text) {
+            return DOMPurify.sanitize(marked.parse(text), {USE_PROFILES: {html: true}});
+        },
         async checkHealth() {
             try {
                 await request("/api/health");
@@ -208,7 +276,20 @@ export default {
             this.loading = true;
             try {
                 this.documents = await request(API);
-                if (this.documents.some(item => ["PENDING", "PROCESSING"].includes(item.status))) {
+                // 删除、替换或编辑资料后，清掉当前页面里旧版本的总结。
+                for (const [id, summary] of Object.entries(this.summaries)) {
+                    const document = this.documents.find(item => item.id === Number(id));
+                    if (!document || document.version !== summary.version) delete this.summaries[id];
+                }
+                if (this.summaryDocument && this.$refs.summaryDialog.open) {
+                    const selected = this.documents.find(item => item.id === this.summaryDocument.id);
+                    if (selected) {
+                        this.summaryDocument = selected;
+                        await this.loadSummary(selected);
+                    }
+                }
+                if (this.documents.some(item => ["PENDING", "PROCESSING"].includes(item.status)
+                        || (item.status === "READY" && ["PENDING", "PROCESSING"].includes(item.summaryStatus)))) {
                     this.refreshTimer = setTimeout(() => this.loadDocuments(), 2000);
                 }
             } catch (error) {
@@ -322,7 +403,7 @@ export default {
             return FILE_TYPES.includes(item.fileType);
         },
         typeInfo(item) {
-            return TYPE_INFO[item.fileType] || [item.fileType, "#60758a"];
+            return TYPE_INFO[item.fileType] || [item.fileType.toUpperCase(), "#60758a"];
         },
         formatDate(value) {
             return new Date(value).toLocaleDateString("zh-CN");
@@ -335,3 +416,17 @@ export default {
     }
 };
 </script>
+
+<style scoped>
+.summary-dialog {
+    padding: 30px;
+}
+.summary-content {
+    white-space: normal;
+    text-align: left;
+    line-height: 1.8;
+    max-height: 50vh;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+}
+</style>

@@ -41,7 +41,6 @@ public class GlobalExceptionHandler {
             IllegalArgumentException.class,
             HttpMessageNotReadableException.class,
             MissingServletRequestPartException.class,
-            MaxUploadSizeExceededException.class,
             IOException.class
     })
     public ResponseEntity<ApiErrorResponse> handleBadRequest(
@@ -52,6 +51,15 @@ public class GlobalExceptionHandler {
                 ? exception.getMessage()
                 : "请求参数或文件内容不正确";
         return response(HttpStatus.BAD_REQUEST, "BAD_REQUEST", message, request, Map.of());
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiErrorResponse> handleFileTooLarge(
+            MaxUploadSizeExceededException exception,
+            HttpServletRequest request
+    ) {
+        return response(HttpStatus.PAYLOAD_TOO_LARGE, "FILE_TOO_LARGE",
+                "文件超过上传大小限制，请缩小文件后重试", request, Map.of());
     }
 
     @ExceptionHandler(NoSuchElementException.class)

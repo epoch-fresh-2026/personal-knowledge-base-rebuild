@@ -65,7 +65,7 @@ class IngestionCommitterTest {
     }
 
     @Test
-    void shouldCommitIndexBeforeSavingReadyAndCompletedStates() {
+    void shouldCommitIndexBeforeSavingReadyAndSummaryCheckpoint() {
         stubOwned();
         job.setStage(IngestionStage.INDEXING);
         PreparedIndex prepared = new PreparedIndex(1L, List.of());
@@ -77,7 +77,9 @@ class IngestionCommitterTest {
         order.verify(documents).save(document);
         order.verify(jobs).save(job);
         assertEquals("READY", document.getStatus());
-        assertEquals(IngestionJobStatus.COMPLETED, job.getStatus());
+        assertEquals("PROCESSING", document.getSummaryStatus());
+        assertEquals(IngestionStage.SUMMARIZING, job.getStage());
+        assertEquals(IngestionJobStatus.RUNNING, job.getStatus());
     }
 
     @Test
@@ -85,6 +87,7 @@ class IngestionCommitterTest {
         assertFalse(committer.indexed(10L, "old", new PreparedIndex(1L, List.of())));
         assertTrue(committer.extracted(10L, "old", new DocumentExtractor.Result("旧", "正文", null)).isEmpty());
         committer.fail(10L, "old", "旧错误");
+        assertFalse(committer.summarized(10L, "old", "旧摘要"));
         verifyNoInteractions(documents, index);
         verify(jobs, never()).save(any());
     }
@@ -103,5 +106,36 @@ class IngestionCommitterTest {
     private void stubOwned() {
         when(jobs.findOwnedForUpdate(10L, "worker")).thenReturn(Optional.of(job));
         when(documents.findById(1L)).thenReturn(Optional.of(document));
+    }
+
+    @Test
+    void shouldCompleteSummaryWithoutChangingOriginalOrIndex() {
+        stubOwned();
+        job.setStage(IngestionStage.SUMMARIZING);
+        document.setStatus("READY");
+        document.setContent("原文");
+        assertTrue(committer.summarized(10L, "worker", "摘要"));
+        assertEquals("摘要", document.getSummary());
+        assertEquals("READY", document.getSummaryStatus());
+        assertEquals("原文", document.getContent());
+        assertEquals("READY", document.getStatus());
+        assertEquals(IngestionJobStatus.COMPLETED, job.getStatus());
+        verifyNoInteractions(index);
+    }
+
+    @Test
+    void shouldKeepDocumentReadyAndHashWhenSummaryFails() {
+        stubOwned();
+        job.setStage(IngestionStage.SUMMARIZING);
+        document.markReady(3);
+        document.setContentHash("hash");
+        committer.fail(10L, "worker", "模型超时");
+        assertEquals("READY", document.getStatus());
+        assertEquals(3, document.getChunkCount());
+        assertEquals("hash", document.getContentHash());
+        assertEquals("FAILED", document.getSummaryStatus());
+        assertEquals("模型超时", document.getSummaryFailureReason());
+        assertEquals(IngestionJobStatus.FAILED, job.getStatus());
+        verifyNoInteractions(index);
     }
 }

@@ -15,6 +15,7 @@ class DocumentTest {
         document.setContentHash("old-hash");
         document.setChunkCount(3);
         document.setFailureReason("旧错误");
+        document.completeSummary("旧摘要");
 
         document.prepareForProcessing();
 
@@ -22,6 +23,8 @@ class DocumentTest {
         assertEquals(0, document.getChunkCount());
         assertNull(document.getContentHash());
         assertNull(document.getFailureReason());
+        assertNull(document.getSummary());
+        assertEquals("PENDING", document.getSummaryStatus());
 
         document.startProcessing();
         assertEquals("PROCESSING", document.getStatus());
