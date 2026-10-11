@@ -18,7 +18,7 @@ class GlobalExceptionHandlerTest {
     void shouldReturnBadRequest() {
         ResponseEntity<ApiErrorResponse> response = handler.handleBadRequest(
                 new IllegalArgumentException("问题不能为空"),
-                request("/api/chat")
+                request("/api/chat/stream")
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());

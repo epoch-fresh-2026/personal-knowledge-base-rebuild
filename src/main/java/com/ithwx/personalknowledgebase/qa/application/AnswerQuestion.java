@@ -17,7 +17,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
-import java.util.function.Function;
 
 @Service
 public class AnswerQuestion {
@@ -44,24 +43,8 @@ public class AnswerQuestion {
         this.maxContextChars = maxContextChars;
     }
 
-    public ChatAnswer answer(String question, List<ChatMessage> history) {
-        return answer(question, history, ignored -> {},
-                evidence -> answerGenerator.generate(question, history, evidence));
-    }
-
     public ChatAnswer answerStreaming(String question, List<ChatMessage> history,
                                      Consumer<String> onStatus, Consumer<String> onDelta) {
-        ChatAnswer result = answer(question, history, onStatus,
-                evidence -> answerGenerator.generateStreaming(question, history, evidence, onDelta));
-        if (result.refused()) {
-            onDelta.accept(result.answer());
-        }
-        return result;
-    }
-
-    // 普通回答和流式回答共用检索、二次检索与拒答规则。
-    private ChatAnswer answer(String question, List<ChatMessage> history,
-                              Consumer<String> onStatus, Function<List<Evidence>, String> generate) {
         onStatus.accept("正在检索资料");
         List<Evidence> evidence = search(question);
         onStatus.accept("找到 " + evidence.size() + " 个片段，正在判断证据");
@@ -80,13 +63,14 @@ public class AnswerQuestion {
 
         if (!decision.sufficient()) {
             onStatus.accept("未找到足够依据，将明确拒答");
+            onDelta.accept(NO_EVIDENCE_MESSAGE);
             return new ChatAnswer(
                     null, question, NO_EVIDENCE_MESSAGE, true,
                     rewrittenQuestion, secondSearchExecuted, List.of());
         }
 
         onStatus.accept("正在生成回答");
-        String answer = generate.apply(evidence);
+        String answer = answerGenerator.generateStreaming(question, history, evidence, onDelta);
         return new ChatAnswer(
                 null, question, answer, false,
                 rewrittenQuestion, secondSearchExecuted, collectSources(evidence));

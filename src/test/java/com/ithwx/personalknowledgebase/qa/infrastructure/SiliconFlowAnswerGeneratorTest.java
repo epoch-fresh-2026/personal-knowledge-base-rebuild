@@ -39,14 +39,15 @@ class SiliconFlowAnswerGeneratorTest {
     @Test
     void shouldGenerateAnswerFromEvidence() {
         SiliconFlowAnswerGenerator generator = new SiliconFlowAnswerGenerator(chatModel, documents);
-        when(chatModel.call(contains("支持 TXT")))
-                .thenReturn(" 支持 TXT。[证据 1] ");
+        when(chatModel.stream(contains("支持 TXT")))
+                .thenReturn(Flux.just(" 支持 TXT。[证据 1] "));
 
-        String answer = generator.generate(
+        String answer = generator.generateStreaming(
                 "支持什么格式？",
                 List.of(),
                 List.of(new Evidence(
-                        1L, "资料", "note", null, 0, "支持 TXT。", 0.9))
+                        1L, "资料", "note", null, 0, "支持 TXT。", 0.9)),
+                ignored -> {}
         );
 
         assertEquals("支持 TXT。[证据 1]", answer);
@@ -139,14 +140,14 @@ class SiliconFlowAnswerGeneratorTest {
         replaced.prepareForProcessing();
         replaced.completeSummary("旧摘要不能作为背景");
         when(documents.findByIds(List.of(1L, 2L, 3L))).thenReturn(List.of(ready, failed, replaced));
-        when(chatModel.call(anyString())).thenAnswer(invocation -> {
+        when(chatModel.stream(anyString())).thenAnswer(invocation -> {
             String prompt = invocation.getArgument(0);
             assertTrue(prompt.contains("全文主题是事务与锁。"));
             assertTrue(prompt.contains("不能代替原文证据"));
             assertTrue(prompt.contains("[证据 1] 原文片段"));
             assertFalse(prompt.contains("旧摘要不能作为背景"));
             assertFalse(prompt.contains("未生成的摘要不能作为背景"));
-            return "依据原文回答。[证据 1]";
+            return Flux.just("依据原文回答。[证据 1]");
         });
         List<Evidence> evidence = List.of(
                 new Evidence(1L, "事务资料", "note", null, 0, "原文片段", 1.0),
@@ -154,12 +155,12 @@ class SiliconFlowAnswerGeneratorTest {
                 new Evidence(2L, "资料二", "note", null, 0, "原文二", 0.8),
                 new Evidence(3L, "资料三", "note", null, 0, "原文三", 0.7),
                 new Evidence(4L, "资料四", "note", null, 0, "原文四", 0.6));
-        new SiliconFlowAnswerGenerator(chatModel, documents).generate("问题", List.of(), evidence);
+        new SiliconFlowAnswerGenerator(chatModel, documents).generateStreaming("问题", List.of(), evidence, ignored -> {});
         verify(documents).findByIds(List.of(1L, 2L, 3L));
     }
 
     @Test
-    void shouldUseSavedSummariesInStreamingPromptToo() {
+    void shouldUseSavedSummariesInStreamingPrompt() {
         Document document = new Document();
         document.setName("资料");
         document.markReady(1);

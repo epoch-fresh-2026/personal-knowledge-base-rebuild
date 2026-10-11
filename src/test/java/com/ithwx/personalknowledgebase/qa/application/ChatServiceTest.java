@@ -1,5 +1,7 @@
 package com.ithwx.personalknowledgebase.qa.application;
 
+import com.ithwx.personalknowledgebase.library.domain.Document;
+import com.ithwx.personalknowledgebase.library.domain.DocumentRepository;
 import com.ithwx.personalknowledgebase.qa.domain.AnswerSource;
 import com.ithwx.personalknowledgebase.qa.domain.Conversation;
 import com.ithwx.personalknowledgebase.qa.domain.ConversationRepository;
@@ -16,12 +18,15 @@ import java.util.concurrent.CancellationException;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -31,12 +36,14 @@ class ChatServiceTest {
     private ConversationRepository conversationRepository;
     @Mock
     private AnswerQuestion answerQuestion;
+    @Mock
+    private DocumentRepository documents;
 
     @Test
     void shouldCreateConversationAndSaveQuestionAndAnswer() {
-        ChatService service = new ChatService(conversationRepository, answerQuestion);
+        ChatService service = new ChatService(conversationRepository, answerQuestion, documents);
         ChatAnswer result = result();
-        when(answerQuestion.answer("支持什么格式？", List.of())).thenReturn(result);
+        when(answerQuestion.answerStreaming(eq("支持什么格式？"), anyList(), any(), any())).thenReturn(result);
         when(conversationRepository.save(any(Conversation.class)))
                 .thenAnswer(invocation -> {
                     Conversation conversation = invocation.getArgument(0);
@@ -44,7 +51,7 @@ class ChatServiceTest {
                             10L, conversation.createdAt(), conversation.messages());
                 });
 
-        ChatAnswer answer = service.ask(null, "  支持什么格式？  ");
+        ChatAnswer answer = service.askStreaming(null, "  支持什么格式？  ", null, ignored -> {}, ignored -> {});
 
         assertEquals(10L, answer.conversationId());
         ArgumentCaptor<Conversation> captor = ArgumentCaptor.forClass(Conversation.class);
@@ -58,14 +65,14 @@ class ChatServiceTest {
 
     @Test
     void shouldContinueExistingConversation() {
-        ChatService service = new ChatService(conversationRepository, answerQuestion);
+        ChatService service = new ChatService(conversationRepository, answerQuestion, documents);
         Conversation conversation = new Conversation(
                 5L, java.time.LocalDateTime.now(), List.of());
         when(conversationRepository.findById(5L)).thenReturn(Optional.of(conversation));
-        when(answerQuestion.answer("继续提问", List.of())).thenReturn(result());
+        when(answerQuestion.answerStreaming(eq("继续提问"), anyList(), any(), any())).thenReturn(result());
         when(conversationRepository.save(conversation)).thenReturn(conversation);
 
-        ChatAnswer answer = service.ask(5L, "继续提问");
+        ChatAnswer answer = service.askStreaming(5L, "继续提问", null, ignored -> {}, ignored -> {});
 
         assertEquals(5L, answer.conversationId());
         assertEquals(2, conversation.messages().size());
@@ -73,7 +80,7 @@ class ChatServiceTest {
 
     @Test
     void shouldRejectUnknownConversation() {
-        ChatService service = new ChatService(conversationRepository, answerQuestion);
+        ChatService service = new ChatService(conversationRepository, answerQuestion, documents);
         when(conversationRepository.findById(99L)).thenReturn(Optional.empty());
 
         assertThrows(java.util.NoSuchElementException.class,
@@ -82,7 +89,7 @@ class ChatServiceTest {
 
     @Test
     void shouldSaveStreamingAnswerOnlyAfterGenerationCompletes() {
-        ChatService service = new ChatService(conversationRepository, answerQuestion);
+        ChatService service = new ChatService(conversationRepository, answerQuestion, documents);
         when(answerQuestion.answerStreaming(eq("问题"), anyList(), any(), any()))
                 .thenReturn(result());
         when(conversationRepository.save(any(Conversation.class))).thenAnswer(invocation -> {
@@ -90,7 +97,7 @@ class ChatServiceTest {
             return new Conversation(10L, conversation.createdAt(), conversation.messages());
         });
 
-        ChatAnswer answer = service.askStreaming(null, " 问题 ", ignored -> {}, ignored -> {});
+        ChatAnswer answer = service.askStreaming(null, " 问题 ", null, ignored -> {}, ignored -> {});
 
         assertEquals(10L, answer.conversationId());
         ArgumentCaptor<Conversation> captor = ArgumentCaptor.forClass(Conversation.class);
@@ -107,10 +114,10 @@ class ChatServiceTest {
                     delta.accept("半截回答");
                     throw new IllegalStateException("上游失败");
                 });
-        ChatService service = new ChatService(conversationRepository, answerQuestion);
+        ChatService service = new ChatService(conversationRepository, answerQuestion, documents);
 
         assertThrows(IllegalStateException.class,
-                () -> service.askStreaming(null, "问题", ignored -> {}, ignored -> {}));
+                () -> service.askStreaming(null, "问题", null, ignored -> {}, ignored -> {}));
         verify(conversationRepository, never()).save(any());
     }
 
@@ -122,12 +129,98 @@ class ChatServiceTest {
                     return result();
                 });
         try {
-            assertThrows(CancellationException.class, () -> new ChatService(conversationRepository, answerQuestion)
-                    .askStreaming(null, "问题", ignored -> {}, ignored -> {}));
+            assertThrows(CancellationException.class, () -> new ChatService(conversationRepository, answerQuestion, documents)
+                    .askStreaming(null, "问题", null, ignored -> {}, ignored -> {}));
             verify(conversationRepository, never()).save(any());
         } finally {
             Thread.interrupted();
         }
+    }
+
+    @Test
+    void shouldReadSelectedSummaryAndSaveItsDocumentSourceWithoutRetrieval() {
+        Document document = summaryDocument();
+        when(documents.findById(38L)).thenReturn(Optional.of(document));
+        when(conversationRepository.save(any())).thenAnswer(invocation -> {
+            Conversation conversation = invocation.getArgument(0);
+            return new Conversation(10L, conversation.createdAt(), conversation.messages());
+        });
+
+        ChatAnswer answer = new ChatService(conversationRepository, answerQuestion, documents)
+                .askStreaming(null, "请总结资料《数据库.pdf》", 38L, ignored -> {}, ignored -> {});
+
+        assertEquals(10L, answer.conversationId());
+        assertFalse(answer.refused());
+        assertFalse(answer.secondSearchExecuted());
+        assertTrue(answer.answer().contains("已保存的文档摘要（模型生成"));
+        assertTrue(answer.answer().contains(document.getSummary()));
+        assertEquals(List.of(new AnswerSource(38L, "数据库.pdf", "pdf", null, List.of())), answer.sources());
+        ArgumentCaptor<Conversation> saved = ArgumentCaptor.forClass(Conversation.class);
+        verify(conversationRepository).save(saved.capture());
+        assertEquals(answer.answer(), saved.getValue().messages().get(1).content());
+        assertEquals(answer.sources(), saved.getValue().messages().get(1).sources());
+        verifyNoInteractions(answerQuestion);
+    }
+
+    @Test
+    void shouldStreamSavedSummaryAndContinueExistingConversation() {
+        Conversation conversation = new Conversation(5L, java.time.LocalDateTime.now(), List.of());
+        when(conversationRepository.findById(5L)).thenReturn(Optional.of(conversation));
+        when(conversationRepository.save(conversation)).thenReturn(conversation);
+        when(documents.findById(38L)).thenReturn(Optional.of(summaryDocument()));
+        List<String> statuses = new java.util.ArrayList<>();
+        List<String> deltas = new java.util.ArrayList<>();
+
+        ChatAnswer answer = new ChatService(conversationRepository, answerQuestion, documents)
+                .askStreaming(5L, "请总结资料《数据库.pdf》", 38L, statuses::add, deltas::add);
+
+        assertEquals(List.of("正在读取已保存的文档摘要"), statuses);
+        assertEquals(List.of(answer.answer()), deltas);
+        assertEquals(5L, answer.conversationId());
+        assertEquals(2, conversation.messages().size());
+        verifyNoInteractions(answerQuestion);
+    }
+
+    @Test
+    void shouldExplainUnavailableSummaryWithoutReturningOldTextOrSources() {
+        Document document = summaryDocument();
+        when(documents.findById(38L)).thenReturn(Optional.of(document));
+        when(conversationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        ChatService service = new ChatService(conversationRepository, answerQuestion, documents);
+
+        for (String summaryStatus : List.of("PENDING", "PROCESSING", "FAILED", "missing")) {
+            document.setSummaryStatus(summaryStatus.equals("missing") ? null : summaryStatus);
+            ChatAnswer answer = service.askStreaming(null, "总结资料", 38L, ignored -> {}, ignored -> {});
+            assertTrue(answer.refused());
+            assertEquals(List.of(), answer.sources());
+            assertFalse(answer.answer().contains(document.getSummary()));
+            assertTrue(answer.answer().contains("摘要"));
+        }
+        document.setStatus("PROCESSING");
+        document.setSummaryStatus("READY");
+        assertTrue(service.askStreaming(null, "总结资料", 38L, ignored -> {}, ignored -> {}).answer().contains("尚未完成解析"));
+        when(documents.findById(38L)).thenReturn(Optional.empty());
+        assertTrue(service.askStreaming(null, "总结资料", 38L, ignored -> {}, ignored -> {}).answer().contains("已删除或不存在"));
+        verifyNoInteractions(answerQuestion);
+    }
+
+    @Test
+    void shouldNotSaveSummaryWhenStreamWasCancelled() {
+        when(documents.findById(38L)).thenReturn(Optional.of(summaryDocument()));
+        ChatService service = new ChatService(conversationRepository, answerQuestion, documents);
+        assertThrows(CancellationException.class, () -> service.askStreaming(null, "总结资料", 38L,
+                ignored -> {}, ignored -> { throw new CancellationException(); }));
+        verify(conversationRepository, never()).save(any());
+    }
+
+    private Document summaryDocument() {
+        Document document = new Document();
+        document.setId(38L);
+        document.setName("数据库.pdf");
+        document.setFileType("pdf");
+        document.setStatus("READY");
+        document.completeSummary("## 事务与锁\n\n事务保证一致性，行锁控制并发。");
+        return document;
     }
 
     private ChatAnswer result() {
