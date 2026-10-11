@@ -41,10 +41,10 @@
                                 <div class="source-list">
                                     <template v-for="source in message.sources" :key="source.documentId">
                                         <a v-if="source.sourceUrl" class="source-card" :href="source.sourceUrl" target="_blank" rel="noopener">
-                                            <strong>{{ source.documentName }}</strong><span>{{ source.sourceType }} · 片段 {{ source.chunkIndexes.join(', ') }}</span>
+                                            <strong>{{ source.documentName }}</strong><span>{{ source.sourceType }} · {{ source.chunkIndexes.length ? '片段 ' + source.chunkIndexes.join(', ') : '文档摘要（模型生成）' }}</span>
                                         </a>
                                         <div v-else class="source-card">
-                                            <strong>{{ source.documentName }}</strong><span>{{ source.sourceType }} · 片段 {{ source.chunkIndexes.join(', ') }}</span>
+                                            <strong>{{ source.documentName }}</strong><span>{{ source.sourceType }} · {{ source.chunkIndexes.length ? '片段 ' + source.chunkIndexes.join(', ') : '文档摘要（模型生成）' }}</span>
                                         </div>
                                     </template>
                                 </div>
@@ -54,18 +54,53 @@
                 </div>
 
                 <form class="chat-composer" @submit.prevent="askQuestion">
+                    <div v-if="summaryAttachment" class="composer-attachment" role="status">
+                        <span class="attachment-icon" aria-hidden="true">文</span>
+                        <div class="attachment-info">
+                            <strong :title="summaryAttachment.name">{{ summaryAttachment.name }}</strong>
+                            <span>来自资料库 · 发送后查看总结</span>
+                        </div>
+                        <button class="attachment-remove" type="button" aria-label="移除所选资料"
+                                :disabled="sending" @click="summaryAttachment = null">×</button>
+                    </div>
                     <label class="sr-only" for="question-input">请输入问题</label>
-                    <textarea id="question-input" v-model="question" maxlength="1000" rows="1" placeholder="输入关于知识库的问题……"
-                              required @keydown.enter.exact.prevent="askQuestion"></textarea>
+                    <textarea id="question-input" :value="summaryAttachment ? '' : question" @input="question = $event.target.value"
+                              maxlength="1000" rows="1" :readonly="!!summaryAttachment" :required="!summaryAttachment"
+                              :placeholder="summaryAttachment ? '点击发送，总结这份资料……' : '输入关于知识库的问题……'"
+                              @keydown.enter.exact.prevent="askQuestion"></textarea>
                     <div class="composer-footer">
-                        <span><kbd>Enter</kbd> 发送 · <kbd>Shift + Enter</kbd> 换行</span>
-                        <span class="question-count"><b>{{ question.length }}</b>/1000</span>
+                        <button class="summary-select-button" type="button" :disabled="sending || loadingConversation"
+                                @click="openSummaryPicker"><span aria-hidden="true">＋</span>总结资料</button>
+                        <span class="composer-shortcut"><kbd>Enter</kbd> 发送 · <kbd>Shift + Enter</kbd> 换行</span>
+                        <span v-if="!summaryAttachment" class="question-count"><b>{{ question.length }}</b>/1000</span>
                         <button v-if="sending" class="send-button stop-button" type="button" @click="stopGeneration"><span>停止生成</span><i aria-hidden="true">■</i></button>
                         <button v-else class="send-button" type="submit" :disabled="loadingConversation"><span>发送</span><i aria-hidden="true">↑</i></button>
                     </div>
                 </form>
             </section>
         </main>
+
+        <dialog ref="summaryPicker" class="confirm-dialog summary-select-dialog" aria-labelledby="summary-picker-title">
+            <h2 id="summary-picker-title">选择已上传的资料</h2>
+            <p>选好后，点击聊天输入框的“发送”查看总结。</p>
+            <p v-if="loadingSummaryDocuments" role="status">正在读取资料库……</p>
+            <p v-else-if="summaryDocumentsError" class="document-error" role="alert">{{ summaryDocumentsError }}</p>
+            <ul v-else-if="summaryDocuments.length" class="summary-document-list">
+                <li v-for="item in summaryDocuments" :key="item.id">
+                    <button type="button" :disabled="item.status === 'FAILED' || (item.status === 'READY' && !['PENDING', 'PROCESSING', 'READY'].includes(item.summaryStatus))"
+                            @click="selectSummaryDocument(item)">
+                        <strong :title="item.name">{{ item.name }}</strong>
+                        <span>{{ summaryStatusText(item) }}</span>
+                    </button>
+                </li>
+            </ul>
+            <p v-else>还没有资料，请先到<a href="/">资料库</a>上传。</p>
+            <p v-if="summaryDocuments.length" class="form-hint">失败或尚无摘要的资料，请先在资料库重试或生成摘要。</p>
+            <div class="dialog-actions">
+                <button class="ghost-button" type="button" @click="$refs.summaryPicker.close()">取消</button>
+                <button v-if="summaryDocumentsError" class="primary-button" type="button" @click="openSummaryPicker">重新读取</button>
+            </div>
+        </dialog>
     </div>
 </template>
 
@@ -92,7 +127,11 @@ export default {
             healthOnline: false,
             loadingConversation: false,
             sending: false,
-            streamController: null
+            streamController: null,
+            summaryAttachment: null,
+            summaryDocuments: [],
+            loadingSummaryDocuments: false,
+            summaryDocumentsError: ""
         };
     },
     mounted() {
@@ -103,6 +142,40 @@ export default {
         this.stopGeneration();
     },
     methods: {
+        async openSummaryPicker() {
+            this.$refs.summaryPicker.showModal();
+            this.loadingSummaryDocuments = true;
+            this.summaryDocumentsError = "";
+            try {
+                this.summaryDocuments = await request("/api/documents");
+            } catch (error) {
+                this.summaryDocumentsError = error.message;
+            } finally {
+                this.loadingSummaryDocuments = false;
+            }
+        },
+        selectSummaryDocument(document) {
+            this.summaryAttachment = document;
+            this.$refs.summaryPicker.close();
+        },
+        summaryStatusText(document) {
+            if (document.status !== "READY") return document.status === "FAILED" ? "处理失败" : "处理中，发送后等待完成";
+            return {READY: "摘要已就绪", PENDING: "摘要生成中", PROCESSING: "摘要生成中", FAILED: "总结失败"}[document.summaryStatus]
+                || "尚无摘要";
+        },
+        async waitForSummary(documentId, pending, signal) {
+            while (true) {
+                signal.throwIfAborted();
+                const result = await request(`/api/documents/${documentId}/summary`, {signal});
+                if (result.documentStatus === "FAILED" || result.status === "FAILED") {
+                    throw new Error(result.failureReason || "资料处理失败，请在资料库中重试");
+                }
+                if (result.documentStatus === "READY" && result.status === "READY") return;
+                pending.stage = result.documentStatus === "READY"
+                    ? "正在生成文档摘要，完成后自动显示……" : "正在解析资料并建立索引……";
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        },
         async checkHealth() {
             try {
                 await request("/api/health");
@@ -130,7 +203,10 @@ export default {
             }
         },
         async askQuestion() {
-            const text = this.question.trim();
+            const document = this.summaryAttachment;
+            await this.sendQuestion(document ? `请总结资料《${document.name}》` : this.question.trim(), document?.id);
+        },
+        async sendQuestion(text, summaryDocumentId = null) {
             if (!text || this.sending || this.loadingConversation) return;
 
             this.messages.push({role: "user", content: text});
@@ -144,14 +220,19 @@ export default {
             });
             // 从 Vue 数组取回响应式对象，确保每个片段到达时页面立即更新。
             const pending = this.messages[this.messages.length - 1];
-            this.question = "";
+            if (summaryDocumentId === null) this.question = "";
             this.sending = true;
             this.streamController = new AbortController();
             await this.scrollToBottom();
 
             try {
+                const body = {conversationId: this.conversationId, question: text};
+                if (summaryDocumentId !== null) {
+                    body.summaryDocumentId = summaryDocumentId;
+                    await this.waitForSummary(summaryDocumentId, pending, this.streamController.signal);
+                }
                 const result = await streamChat(
-                    {conversationId: this.conversationId, question: text},
+                    body,
                     (event, data) => {
                         if (event === "status") pending.stage = data.text;
                         if (event === "delta") pending.content += data.text;
@@ -169,6 +250,7 @@ export default {
                     secondSearchExecuted: result.secondSearchExecuted,
                     rewrittenQuestion: result.rewrittenQuestion
                 });
+                if (summaryDocumentId !== null) this.summaryAttachment = null;
             } catch (error) {
                 Object.assign(pending, {
                     error: error.name === "AbortError" ? "已停止生成" : error.message,

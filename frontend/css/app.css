@@ -1467,16 +1467,134 @@ a.source-card:hover {
     resize: none;
 }
 
+.composer-attachment {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--canvas);
+}
+
+.attachment-icon {
+    display: grid;
+    width: 34px;
+    height: 38px;
+    place-items: center;
+    border-radius: 7px;
+    color: var(--primary);
+    background: var(--paper);
+    font-size: 14px;
+}
+
+.attachment-info {
+    min-width: 0;
+}
+
+.attachment-info strong,
+.attachment-info span {
+    display: block;
+}
+
+.attachment-info strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+}
+
+.attachment-info span {
+    color: var(--muted);
+    font-size: 10px;
+}
+
+.attachment-remove {
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 6px;
+    color: var(--muted);
+    background: transparent;
+    font-size: 18px;
+}
+
+.summary-select-button {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--primary);
+    background: var(--canvas);
+    font-size: 12px;
+}
+
+.summary-select-button:hover,
+.attachment-remove:hover {
+    background: var(--line);
+}
+
+.summary-select-dialog {
+    width: 480px;
+    max-width: calc(100vw - 32px);
+    padding: 24px;
+}
+
+.summary-document-list {
+    display: grid;
+    gap: 8px;
+    max-height: 320px;
+    margin: 18px 0;
+    padding: 0;
+    overflow-y: auto;
+    list-style: none;
+}
+
+.summary-document-list button {
+    display: grid;
+    gap: 5px;
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--canvas);
+    text-align: left;
+}
+
+.summary-document-list button:hover:not(:disabled) {
+    border-color: var(--primary);
+}
+
+.summary-document-list strong {
+    overflow-wrap: anywhere;
+    font-size: 12px;
+}
+
+.summary-document-list span {
+    color: var(--muted);
+    font-size: 11px;
+}
+
 .composer-footer {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 14px;
+    gap: 8px;
     color: #99a5b0;
     font-size: 8px;
 }
 
 .composer-footer kbd {
     font-family: inherit;
+}
+
+.composer-footer .send-button {
+    margin-left: auto;
 }
 
 .question-count {
@@ -1581,7 +1699,7 @@ a.source-card:hover {
         margin: 0 10px 10px;
     }
 
-    .composer-footer > span:first-child {
+    .composer-shortcut {
         display: none;
     }
 

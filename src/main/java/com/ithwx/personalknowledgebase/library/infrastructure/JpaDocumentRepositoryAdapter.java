@@ -2,12 +2,17 @@ package com.ithwx.personalknowledgebase.library.infrastructure;
 
 import com.ithwx.personalknowledgebase.library.domain.Document;
 import com.ithwx.personalknowledgebase.library.domain.DocumentRepository;
+import com.ithwx.personalknowledgebase.library.domain.RelatedDocument;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 
 @Repository
+@Transactional(readOnly = true)
 public class JpaDocumentRepositoryAdapter implements DocumentRepository {
 
     private final JpaDocumentRepository jpaRepository;
@@ -41,6 +46,14 @@ public class JpaDocumentRepositoryAdapter implements DocumentRepository {
     }
 
     @Override
+    public List<RelatedDocument> findRelated(Long documentId, Set<String> concepts, int limit) {
+        return jpaRepository.findRelated(documentId, concepts, limit).stream()
+                .map(entity -> new RelatedDocument(entity.getId(), entity.getVersion(), entity.getName(),
+                        entity.getConcepts().stream().filter(concepts::contains).sorted().toList()))
+                .toList();
+    }
+
+    @Override
     public boolean existsByContentHash(String hash) {
         return jpaRepository.existsByContentHash(hash);
     }
@@ -51,11 +64,13 @@ public class JpaDocumentRepositoryAdapter implements DocumentRepository {
     }
 
     @Override
+    @Transactional
     public Document save(Document document) {
         return toDocument(jpaRepository.saveAndFlush(toEntity(document)));
     }
 
     @Override
+    @Transactional
     public void delete(Document document) {
         jpaRepository.delete(toEntity(document));
     }
@@ -71,6 +86,7 @@ public class JpaDocumentRepositoryAdapter implements DocumentRepository {
         document.setContentHash(entity.getContentHash());
         document.setContent(entity.getContent());
         document.setSummary(entity.getSummary());
+        document.setConcepts(Set.copyOf(entity.getConcepts()));
         document.setSummaryStatus(entity.getSummaryStatus());
         document.setSummaryFailureReason(entity.getSummaryFailureReason());
         document.setUploadTime(entity.getUploadTime());
@@ -91,6 +107,7 @@ public class JpaDocumentRepositoryAdapter implements DocumentRepository {
         entity.setContentHash(document.getContentHash());
         entity.setContent(document.getContent());
         entity.setSummary(document.getSummary());
+        entity.setConcepts(new HashSet<>(document.getConcepts()));
         entity.setSummaryStatus(document.getSummaryStatus());
         entity.setSummaryFailureReason(document.getSummaryFailureReason());
         entity.setUploadTime(document.getUploadTime());

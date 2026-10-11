@@ -3,6 +3,7 @@ package com.ithwx.personalknowledgebase.library.application;
 import com.ithwx.personalknowledgebase.library.domain.Document;
 import com.ithwx.personalknowledgebase.library.domain.DocumentDeleted;
 import com.ithwx.personalknowledgebase.library.domain.DocumentRepository;
+import com.ithwx.personalknowledgebase.library.domain.RelatedDocument;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -71,6 +72,15 @@ public class DocumentService {
 
     public Document get(Long id) {
         return requiredDocument(id);
+    }
+
+    public List<RelatedDocument> related(Long id) {
+        Document document = requiredDocument(id);
+        if (!"READY".equals(document.getStatus()) || !"READY".equals(document.getSummaryStatus())
+                || document.getConcepts().isEmpty()) {
+            return List.of();
+        }
+        return repository.findRelated(id, document.getConcepts(), 5);
     }
 
     @Transactional

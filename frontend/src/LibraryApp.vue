@@ -78,6 +78,8 @@
                             <div class="document-actions">
                                 <button v-if="item.status === 'READY'" type="button" title="总结资料"
                                         @click="summarizeDocument(item)">{{ ['PENDING', 'PROCESSING'].includes(item.summaryStatus) ? "总结中…" : "查看总结" }}</button>
+                                <button v-if="item.status === 'READY'" type="button" title="相关资料"
+                                        @click="showRelated(item)">相关资料</button>
                                 <button v-if="item.status === 'FAILED'" type="button" title="重新处理" @click="retryDocument(item)">↻</button>
                                 <button v-if="item.fileType === 'note'" type="button" title="修改笔记" @click="openNoteEditor(item)">✎</button>
                                 <button v-if="isFile(item)" type="button" title="替换文件" @click="openFileDialog(item)">↥</button>
@@ -148,6 +150,30 @@
                         @click="retrySummary(summaryDocument)">重试总结</button>
                 <button v-else-if="currentSummary?.error" class="primary-button" type="button"
                         @click="loadSummary(summaryDocument)">重新读取</button>
+                <button v-else-if="currentSummary?.status === 'READY'" class="primary-button" type="button"
+                        @click="retrySummary(summaryDocument)">重新生成摘要与概念</button>
+            </div>
+        </dialog>
+
+        <dialog class="confirm-dialog edit-dialog summary-dialog" ref="relatedDialog">
+            <h2>相关资料</h2><p>{{ relatedDocument?.name }}</p>
+            <p v-if="related.loading" role="status">正在查找共同概念……</p>
+            <p v-else-if="related.error" class="document-error" role="alert">{{ related.error }}</p>
+            <div v-else class="related-content">
+                <p v-if="related.concepts.length">关键概念：{{ related.concepts.join('、') }}</p>
+                <p v-else>关键概念尚未生成。请等待总结完成；旧资料可在总结窗口重新生成摘要与概念。</p>
+                <ul v-if="related.documents.length" class="related-list">
+                    <li v-for="item in related.documents" :key="item.id">
+                        <button class="ghost-button" type="button" @click="$refs.relatedDialog.close(); summarizeDocument(item)">{{ item.name }}</button>
+                        <span>共同概念：{{ item.sharedConcepts.join('、') }}</span>
+                    </li>
+                </ul>
+                <p v-else-if="related.concepts.length">暂未找到具有共同概念的资料。</p>
+            </div>
+            <p class="form-hint">最多显示 5 份资料，按共同概念数量排序。主题相关不代表因果关系，也不是回答依据。</p>
+            <div class="dialog-actions">
+                <button class="ghost-button" type="button" @click="$refs.relatedDialog.close()">关闭</button>
+                <button class="primary-button" type="button" @click="showRelated(relatedDocument)">刷新关联</button>
             </div>
         </dialog>
 
@@ -159,11 +185,9 @@
 import DOMPurify from "dompurify";
 import {marked} from "marked";
 import AppHeader from "./AppHeader.vue";
-import {jsonRequest, request} from "./api.js";
+import {DOCUMENT_FILE_TYPES as FILE_TYPES, jsonRequest, request} from "./api.js";
 
 const API = "/api/documents";
-const FILE_TYPES = ["txt", "md", "markdown", "pdf", "doc", "docx", "ppt", "pptx",
-    "xls", "xlsx", "csv", "tsv", "html", "htm", "rtf", "odt", "ods", "odp", "epub"];
 const TYPE_INFO = {
     txt: ["TXT", "#287f96"],
     md: ["MARKDOWN", "#765aa3"],
@@ -201,6 +225,8 @@ export default {
             selectedDocument: null,
             summaryDocument: null,
             summaries: {},
+            relatedDocument: null,
+            related: {loading: false, error: "", concepts: [], documents: []},
             toast: {visible: false, error: false, message: ""},
             refreshTimer: null,
             toastTimer: null
@@ -229,6 +255,24 @@ export default {
         clearTimeout(this.toastTimer);
     },
     methods: {
+        async showRelated(item) {
+            this.relatedDocument = item;
+            if (!this.$refs.relatedDialog.open) this.$refs.relatedDialog.showModal();
+            this.related = {loading: true, error: "", concepts: [], documents: []};
+            // 每次只更新本次请求的对象，切换资料时不会混入上一份资料的响应。
+            const related = this.related;
+            try {
+                const [document, documents] = await Promise.all([
+                    request(`${API}/${item.id}`), request(`${API}/${item.id}/related`)
+                ]);
+                related.concepts = document.concepts;
+                related.documents = documents;
+            } catch (error) {
+                related.error = error.message;
+            } finally {
+                related.loading = false;
+            }
+        },
         async summarizeDocument(item) {
             this.summaryDocument = item;
             this.$refs.summaryDialog.showModal();
@@ -428,5 +472,27 @@ export default {
     max-height: 50vh;
     overflow-y: auto;
     overflow-wrap: anywhere;
+}
+.related-content {
+    text-align: left;
+    max-height: 50vh;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+}
+.related-list {
+    list-style: none;
+    padding: 0;
+}
+.related-list li {
+    display: grid;
+    gap: 6px;
+    margin: 16px 0;
+}
+.related-list button {
+    text-align: left;
+}
+.related-list span {
+    font-size: 13px;
+    color: #60758a;
 }
 </style>

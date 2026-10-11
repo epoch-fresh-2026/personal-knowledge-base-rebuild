@@ -2,10 +2,14 @@ package com.ithwx.personalknowledgebase.library.infrastructure;
 
 import com.ithwx.personalknowledgebase.library.domain.DocumentStatus;
 import jakarta.persistence.Column;
+import jakarta.persistence.CollectionTable;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
@@ -15,6 +19,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.Set;
 
 @Getter
 @Setter
@@ -51,6 +57,14 @@ public class DocumentEntity {
 
     @Column(columnDefinition = "TEXT")
     private String summary;
+
+    // JPA 保存到文档概念表，删除文档时一并删除；不另存一份容易过期的关联边。
+    @ElementCollection
+    @CollectionTable(name = "document_concept", joinColumns = @JoinColumn(name = "document_id"),
+            uniqueConstraints = @UniqueConstraint(columnNames = {"document_id", "concept"}),
+            indexes = @Index(name = "idx_document_concept_name", columnList = "concept"))
+    @Column(name = "concept", nullable = false, length = 100)
+    private Set<String> concepts = new HashSet<>();
 
     @Column(name = "summary_status", length = 32)
     private String summaryStatus;

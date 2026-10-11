@@ -1,6 +1,7 @@
 package com.ithwx.personalknowledgebase.controller;
 
 import com.ithwx.personalknowledgebase.library.application.DocumentService;
+import com.ithwx.personalknowledgebase.library.domain.RelatedDocument;
 import com.ithwx.personalknowledgebase.controller.dto.DocumentSummaryResponse;
 import com.ithwx.personalknowledgebase.controller.dto.DocumentDetailResponse;
 import com.ithwx.personalknowledgebase.controller.dto.DocumentResponse;
@@ -69,6 +70,11 @@ public class DocumentController {
     @GetMapping("/{id}/summary")
     public DocumentSummaryResponse summary(@PathVariable Long id) {
         return DocumentSummaryResponse.from(service.get(id));
+    }
+
+    @GetMapping("/{id}/related")
+    public List<RelatedDocument> related(@PathVariable Long id) {
+        return service.related(id);
     }
 
     @PostMapping("/{id}/summary")

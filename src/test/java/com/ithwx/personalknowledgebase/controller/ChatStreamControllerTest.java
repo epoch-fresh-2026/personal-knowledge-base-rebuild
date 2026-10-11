@@ -3,6 +3,7 @@ package com.ithwx.personalknowledgebase.controller;
 import com.ithwx.personalknowledgebase.common.GlobalExceptionHandler;
 import com.ithwx.personalknowledgebase.qa.application.ChatAnswer;
 import com.ithwx.personalknowledgebase.qa.application.ChatService;
+import com.ithwx.personalknowledgebase.qa.domain.AnswerSource;
 import jakarta.servlet.AsyncEvent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,15 +61,15 @@ class ChatStreamControllerTest {
         CountDownLatch partial = new CountDownLatch(1);
         CountDownLatch finish = new CountDownLatch(1);
         doAnswer(invocation -> {
-            Consumer<String> stage = invocation.getArgument(2);
-            Consumer<String> delta = invocation.getArgument(3);
+            Consumer<String> stage = invocation.getArgument(3);
+            Consumer<String> delta = invocation.getArgument(4);
             stage.accept("正在生成回答");
             delta.accept("第一段\n");
             partial.countDown();
             finish.await();
             delta.accept("第二段");
             return answer();
-        }).when(service).askStreaming(isNull(), eq("问题"), any(), any());
+        }).when(service).askStreaming(isNull(), eq("问题"), isNull(), any(), any());
 
         MvcResult result = start();
         assertTrue(partial.await(2, TimeUnit.SECONDS));
@@ -89,13 +90,39 @@ class ChatStreamControllerTest {
     @Test
     void shouldSendSafeErrorWithoutDone() throws Exception {
         doThrow(new IllegalStateException("secret-api-key"))
-                .when(service).askStreaming(isNull(), eq("问题"), any(), any());
+                .when(service).askStreaming(isNull(), eq("问题"), isNull(), any(), any());
         MvcResult result = start();
         result.getAsyncResult(2_000);
         String body = mvc.perform(asyncDispatch(result)).andReturn().getResponse().getContentAsString();
         assertTrue(body.contains("event:error"));
         assertFalse(body.contains("secret-api-key"));
         assertFalse(body.contains("event:done"));
+    }
+
+    @Test
+    void shouldPassSummaryDocumentAndSendStoredSummaryWithSource() throws Exception {
+        doAnswer(invocation -> {
+            Consumer<String> stage = invocation.getArgument(3);
+            Consumer<String> delta = invocation.getArgument(4);
+            stage.accept("正在读取已保存的文档摘要");
+            delta.accept("已保存的摘要");
+            return new ChatAnswer(7L, "总结资料", "已保存的摘要", false, null, false,
+                    List.of(new AnswerSource(
+                            38L, "数据库.pdf", "pdf", null, List.of())));
+        }).when(service).askStreaming(eq(7L), eq("总结资料"), eq(38L), any(), any());
+
+        MvcResult result = mvc.perform(post("/api/chat/stream").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"conversationId":7,"question":"总结资料","summaryDocumentId":38}
+                                """))
+                .andExpect(request().asyncStarted()).andReturn();
+        result.getAsyncResult(2_000);
+        String body = mvc.perform(asyncDispatch(result)).andReturn().getResponse().getContentAsString();
+        assertTrue(body.contains("正在读取已保存的文档摘要"), body);
+        assertTrue(body.contains("event:delta"));
+        assertTrue(body.contains("event:done"));
+        assertTrue(body.contains("\"documentId\":38"));
+        assertTrue(body.contains("\"chunkIndexes\":[]"));
     }
 
     @Test
@@ -132,7 +159,7 @@ class ChatStreamControllerTest {
                 .andExpect(jsonPath("$.message").value("当前问答繁忙，请稍后重试"));
         controller.shutdown();
         assertTrue(interrupted.await(2, TimeUnit.SECONDS));
-        verify(service, times(1)).askStreaming(isNull(), eq("问题"), any(), any());
+        verify(service, times(1)).askStreaming(isNull(), eq("问题"), isNull(), any(), any());
     }
 
     @Test
@@ -161,7 +188,7 @@ class ChatStreamControllerTest {
                 throw new CancellationException();
             }
             return answer();
-        }).when(service).askStreaming(isNull(), eq("问题"), any(), any());
+        }).when(service).askStreaming(isNull(), eq("问题"), isNull(), any(), any());
     }
 
     private MvcResult start() throws Exception {

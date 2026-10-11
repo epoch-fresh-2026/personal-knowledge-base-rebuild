@@ -1,6 +1,7 @@
 package com.ithwx.personalknowledgebase.library.domain;
 
 import org.junit.jupiter.api.Test;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -16,6 +17,7 @@ class DocumentTest {
         document.setChunkCount(3);
         document.setFailureReason("旧错误");
         document.completeSummary("旧摘要");
+        document.setConcepts(Set.of("旧概念"));
 
         document.prepareForProcessing();
 
@@ -24,6 +26,7 @@ class DocumentTest {
         assertNull(document.getContentHash());
         assertNull(document.getFailureReason());
         assertNull(document.getSummary());
+        assertTrue(document.getConcepts().isEmpty());
         assertEquals("PENDING", document.getSummaryStatus());
 
         document.startProcessing();

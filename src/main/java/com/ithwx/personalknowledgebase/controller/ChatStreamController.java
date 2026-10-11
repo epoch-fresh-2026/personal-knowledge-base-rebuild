@@ -59,7 +59,7 @@ public class ChatStreamController {
         //FutureTask：先写任务单，还没有开始工作
         FutureTask<Void> work = new FutureTask<>(() -> {
             try {
-                ChatAnswer answer = chatService.askStreaming(request.conversationId(), request.question(),
+                ChatAnswer answer = chatService.askStreaming(request.conversationId(), request.question(), request.summaryDocumentId(),
                         text -> send(emitter, closed, "status", Map.of("text", text)),//你有进度消息时，就把它作为 status 事件发送
                         text -> send(emitter, closed, "delta", Map.of("text", text)));//你收到一段模型回答时，就把它作为 delta 事件发送。
                 // 会话保存成功后才发送 done；客户端以它判断本轮是否真正完成。

@@ -30,6 +30,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
+import java.util.stream.Collectors;
 import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
@@ -91,7 +92,7 @@ public final class IngestionTestApplication {
         @Bean
         SummarizeDocument summarizer(Environment environment) {
             return new SummarizeDocument(null) {
-                @Override public String summarize(String content) {
+                @Override public Result summarize(String content) {
                     if (environment.getProperty("test.block-summary", Boolean.class, false)) {
                         System.out.println("SUMMARY_CHECKPOINT");
                         System.out.flush();
@@ -105,7 +106,8 @@ public final class IngestionTestApplication {
                     if (content.contains("模拟总结失败")) {
                         throw new IllegalStateException("模拟总结失败");
                     }
-                    return "摘要：" + content;
+                    return new Result("摘要：" + content, List.of("事务", "行锁", "并发控制", "Java")
+                            .stream().filter(content::contains).collect(Collectors.toSet()));
                 }
             };
         }

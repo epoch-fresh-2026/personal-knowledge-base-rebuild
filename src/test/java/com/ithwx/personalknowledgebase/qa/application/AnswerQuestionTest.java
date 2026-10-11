@@ -46,12 +46,12 @@ class AnswerQuestionTest {
                 org.mockito.ArgumentMatchers.eq("支持什么格式？"),
                 anyList(), anyList()))
                 .thenReturn(RetrievalDecision.enough());
-        when(answerGenerator.generate(
+        when(answerGenerator.generateStreaming(
                 org.mockito.ArgumentMatchers.eq("支持什么格式？"),
-                anyList(), anyList()))
+                anyList(), anyList(), any()))
                 .thenReturn("支持 TXT。[证据 1]");
 
-        ChatAnswer answer = service.answer("支持什么格式？", List.of());
+        ChatAnswer answer = service.answerStreaming("支持什么格式？", List.of(), ignored -> {}, ignored -> {});
 
         assertFalse(answer.refused());
         assertFalse(answer.secondSearchExecuted());
@@ -73,12 +73,12 @@ class AnswerQuestionTest {
                         RetrievalDecision.retry("Spring Boot 如何连接数据库？"),
                         RetrievalDecision.enough()
                 );
-        when(answerGenerator.generate(
+        when(answerGenerator.generateStreaming(
                 org.mockito.ArgumentMatchers.eq("它怎么连接？"),
-                anyList(), anyList()))
+                anyList(), anyList(), any()))
                 .thenReturn("使用 JDBC。[证据 1]");
 
-        ChatAnswer answer = service.answer("它怎么连接？", List.of());
+        ChatAnswer answer = service.answerStreaming("它怎么连接？", List.of(), ignored -> {}, ignored -> {});
 
         assertFalse(answer.refused());
         assertTrue(answer.secondSearchExecuted());
@@ -101,13 +101,12 @@ class AnswerQuestionTest {
                         RetrievalDecision.retry("仍然无法检索")
                 );
 
-        ChatAnswer answer = service.answer("未知问题", List.of());
+        ChatAnswer answer = service.answerStreaming("未知问题", List.of(), ignored -> {}, ignored -> {});
 
         assertTrue(answer.refused());
         assertEquals(AnswerQuestion.NO_EVIDENCE_MESSAGE, answer.answer());
         assertTrue(answer.sources().isEmpty());
-        verify(answerGenerator, never()).generate(
-                org.mockito.ArgumentMatchers.anyString(), anyList(), anyList());
+        verify(answerGenerator, never()).generateStreaming(anyString(), anyList(), anyList(), any());
     }
 
     @Test
@@ -135,7 +134,6 @@ class AnswerQuestionTest {
         assertEquals("第一段第二段", answer.answer());
         assertTrue(answer.secondSearchExecuted());
         assertEquals(List.of(1, 0), answer.sources().get(0).chunkIndexes());
-        verify(answerGenerator, never()).generate(anyString(), anyList(), anyList());
     }
 
     @Test

@@ -26,15 +26,6 @@ public class SiliconFlowAnswerGenerator implements AnswerGenerator {
     }
 
     @Override
-    public String generate(
-            String question,
-            List<ChatMessage> history,
-            List<Evidence> evidence
-    ) {
-        return requireAnswer(chatModel.call(prompt(question, history, evidence)));
-    }
-
-    @Override
     public String generateStreaming(String question, List<ChatMessage> history,
                                     List<Evidence> evidence, Consumer<String> onDelta) {
         StringBuilder answer = new StringBuilder();

@@ -26,7 +26,10 @@ async function render(data) {
 }
 
 function createVm(data = {}) {
-    const vm = reactive({...LibraryApp.data(), $refs: {summaryDialog: {open: false, showModal() {}}}, ...data});
+    const vm = reactive({...LibraryApp.data(), $refs: {
+        summaryDialog: {open: false, showModal() {}},
+        relatedDialog: {open: false, showModal() { this.open = true; }}
+    }, ...data});
     for (const [name, method] of Object.entries(LibraryApp.methods)) vm[name] = method.bind(vm);
     return vm;
 }
@@ -42,6 +45,7 @@ test("upload and replacement support the same document formats and ready documen
         assert.ok(accepts[0].split(",").includes(type));
     }
     assert.equal([...html.matchAll(/title="总结资料"/g)].length, 1);
+    assert.equal([...html.matchAll(/title="相关资料"/g)].length, 1);
     assert.match(html, /title="替换文件"/);
     assert.match(html, /单个文件最大 20MB/);
 });
@@ -203,4 +207,68 @@ test("failed and legacy summaries can be queued without rebuilding documents", a
     fetch.mock.mockImplementation(async () => Response.json({status: null, summary: null}));
     await vm.summarizeDocument(ppt);
     assert.match(await render(vm), />生成摘要<\/button>/);
+});
+
+test("related documents show concepts and shared topics without calling a model", async t => {
+    const fetch = t.mock.method(globalThis, "fetch", async (url, options) => {
+        assert.notEqual(options?.method, "POST");
+        if (url === "/api/documents/1") return Response.json({id: 1, concepts: ["事务", "行锁"]});
+        assert.equal(url, "/api/documents/1/related");
+        return Response.json([{id: 2, version: 3, name: "并发控制.pptx", sharedConcepts: ["行锁"]}]);
+    });
+    const vm = createVm({documents: [ppt]});
+    await vm.showRelated(ppt);
+    assert.equal(vm.$refs.relatedDialog.open, true);
+    assert.deepEqual(vm.related.concepts, ["事务", "行锁"]);
+    assert.equal(fetch.mock.callCount(), 2);
+    const html = await render(vm);
+    assert.match(html, /关键概念：事务、行锁/);
+    assert.match(html, /并发控制.pptx/);
+    assert.match(html, /共同概念：行锁/);
+    assert.match(html, /不是回答依据/);
+});
+
+test("related view explains pending concepts and empty matches separately", async t => {
+    let concepts = [];
+    t.mock.method(globalThis, "fetch", async url => Response.json(url.endsWith("/related") ? [] : {concepts}));
+    const vm = createVm({documents: [ppt]});
+    await vm.showRelated(ppt);
+    assert.match(await render(vm), /关键概念尚未生成/);
+    concepts = ["行锁"];
+    await vm.showRelated(ppt);
+    assert.match(await render(vm), /暂未找到具有共同概念的资料/);
+    vm.summaryDocument = ppt;
+    vm.summaries[1] = {status: "READY", text: "旧摘要"};
+    assert.match(await render(vm), />重新生成摘要与概念<\/button>/);
+});
+
+test("switching related documents cannot mix late responses", async t => {
+    const finish = new Map();
+    t.mock.method(globalThis, "fetch", url => new Promise(resolve => finish.set(url, resolve)));
+    const vm = createVm({documents: [ppt]});
+    const first = vm.showRelated(ppt);
+    assert.match(await render(vm), /正在查找共同概念/);
+    const second = vm.showRelated({...ppt, id: 2, name: "另一份资料"});
+    finish.get("/api/documents/2")(Response.json({concepts: ["Java"]}));
+    finish.get("/api/documents/2/related")(Response.json([]));
+    await second;
+    finish.get("/api/documents/1")(Response.json({concepts: ["旧概念"]}));
+    finish.get("/api/documents/1/related")(Response.json([{id: 3, name: "旧关联", sharedConcepts: ["旧概念"]}]));
+    await first;
+    assert.equal(vm.relatedDocument.id, 2);
+    assert.deepEqual(vm.related.concepts, ["Java"]);
+    assert.deepEqual(vm.related.documents, []);
+});
+
+test("related request errors clear previous matches and allow refresh", async t => {
+    const fetch = t.mock.method(globalThis, "fetch", async () => Response.json({message: "资料不存在：1"}, {status: 404}));
+    const vm = createVm({documents: [ppt], related: {loading: false, error: "", concepts: ["旧概念"], documents: []}});
+    await vm.showRelated(ppt);
+    assert.equal(vm.related.loading, false);
+    assert.deepEqual(vm.related.concepts, []);
+    assert.match(await render(vm), /资料不存在：1/);
+    fetch.mock.mockImplementation(async url => Response.json(url.endsWith("/related") ? [] : {concepts: ["新概念"]}));
+    await vm.showRelated(ppt);
+    assert.equal(vm.related.error, "");
+    assert.deepEqual(vm.related.concepts, ["新概念"]);
 });
