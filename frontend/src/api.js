@@ -1,8 +1,12 @@
+export const DOCUMENT_FILE_TYPES = ["txt", "md", "markdown", "pdf", "doc", "docx", "ppt", "pptx",
+    "xls", "xlsx", "csv", "tsv", "html", "htm", "rtf", "odt", "ods", "odp", "epub"];
+
 export async function request(url, options) {
     let response;
     try {
         response = await fetch(url, options);
-    } catch {
+    } catch (error) {
+        if (error.name === "AbortError") throw error;
         throw new Error("无法连接服务器，请检查服务和网络后重试");
     }
     if (response.status === 204) return;

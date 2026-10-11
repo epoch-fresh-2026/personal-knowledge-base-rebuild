@@ -33,6 +33,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
@@ -75,7 +76,7 @@ class IngestionSafetyIT {
         jdbc = context.getBean(JdbcTemplate.class);
         assertEquals(postgres.getJdbcUrl(), context.getEnvironment().getProperty("spring.datasource.url"));
         // 只清理本测试创建的临时数据库，永不读取 .env 或业务数据库地址。
-        jdbc.execute("TRUNCATE TABLE ingestion_job, document, vector_store RESTART IDENTITY");
+        jdbc.execute("TRUNCATE TABLE document_concept, ingestion_job, document, vector_store RESTART IDENTITY");
         service = context.getBean(DocumentService.class);
         documents = context.getBean(DocumentRepository.class);
         jobs = context.getBean(IngestionJobRepository.class);
@@ -163,7 +164,7 @@ class IngestionSafetyIT {
         assertTrue(committer.indexed(current.getId(), "new", prepared(document, "新结果")));
         assertEquals("新结果", jdbc.queryForObject("SELECT content FROM vector_store", String.class));
         assertEquals("READY", documents.findById(document.getId()).orElseThrow().getStatus());
-        assertTrue(committer.summarized(current.getId(), "new", "新摘要"));
+        assertTrue(committer.summarized(current.getId(), "new", new SummarizeDocument.Result("新摘要", Set.of("新概念"))));
         assertEquals("COMPLETED", status(current));
     }
 
@@ -332,15 +333,17 @@ class IngestionSafetyIT {
         IngestionJob first = indexingJob(deleted, "old");
         assertTrue(committer.indexed(first.getId(), "old", prepared(deleted, "原文")));
         service.delete(deleted.getId());
-        assertFalse(committer.summarized(first.getId(), "old", "已删除的摘要"));
+        assertFalse(committer.summarized(first.getId(), "old", new SummarizeDocument.Result("已删除的摘要", Set.of("旧概念"))));
         assertTrue(documents.findById(deleted.getId()).isEmpty());
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM document_concept", Integer.class));
 
         Document edited = note("总结时编辑");
         IngestionJob second = indexingJob(edited, "old");
         assertTrue(committer.indexed(second.getId(), "old", prepared(edited, "原文")));
         service.update(edited.getId(), "新资料", "新正文");
-        assertFalse(committer.summarized(second.getId(), "old", "旧正文的摘要"));
+        assertFalse(committer.summarized(second.getId(), "old", new SummarizeDocument.Result("旧正文的摘要", Set.of("旧概念"))));
         assertNull(documents.findById(edited.getId()).orElseThrow().getSummary());
+        assertTrue(documents.findById(edited.getId()).orElseThrow().getConcepts().isEmpty());
         context.getBean(ProcessDocument.class).processNext();
         assertEquals("摘要：新正文", documents.findById(edited.getId()).orElseThrow().getSummary());
     }
@@ -378,6 +381,61 @@ class IngestionSafetyIT {
         IngestionJob job = indexingJob(document, "worker");
         assertTrue(committer.indexed(job.getId(), "worker", prepared(document, "正文")));
         assertEquals("SUMMARIZING", jdbc.queryForObject("SELECT stage FROM ingestion_job", String.class));
+    }
+
+    @Test
+    void shouldPersistConceptsAndFindSymmetricRelationsWithoutStaleDeletedOrEditedResults() {
+        Document first = processedNote("数据库事务", "事务通过行锁控制操作，示例一。");
+        Document second = processedNote("并发控制", "事务与行锁用于并发控制，示例二。");
+        Document third = processedNote("锁笔记", "行锁限制同一行的访问，示例三。");
+        processedNote("其他课程", "这份资料只讲 Java，示例四。");
+        Document pending = service.createNote("待处理", "事务与行锁，尚未完成索引。");
+
+        assertEquals(Set.of("事务", "行锁"), service.get(first.getId()).getConcepts());
+        var related = service.related(first.getId());
+        assertEquals(List.of(second.getId(), third.getId()), related.stream().map(item -> item.id()).toList());
+        assertEquals(List.of("事务", "行锁"), related.get(0).sharedConcepts());
+        assertTrue(service.related(second.getId()).stream().anyMatch(item -> item.id().equals(first.getId())));
+        assertTrue(service.related(pending.getId()).isEmpty());
+
+        service.delete(second.getId());
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM document_concept WHERE document_id = ?", Integer.class, second.getId()));
+        assertEquals(List.of(third.getId()), service.related(first.getId()).stream().map(item -> item.id()).toList());
+
+        service.update(first.getId(), "改为另一门课", "正文已变成 Java 编程。");
+        assertTrue(service.get(first.getId()).getConcepts().isEmpty());
+        assertTrue(service.related(first.getId()).isEmpty());
+        assertTrue(service.related(third.getId()).isEmpty());
+    }
+
+    @Test
+    void shouldLimitRelationsToFiveAndBackfillOldSummaryWithoutReindexing() {
+        Document source = processedNote("原资料", "事务的定义，原资料。");
+        for (int number = 0; number < 7; number++) {
+            processedNote("相关资料" + number, "事务的应用，例子" + number);
+        }
+        assertEquals(5, service.related(source.getId()).size());
+        assertEquals(service.related(source.getId()), service.related(source.getId()));
+
+        // 模拟旧版本已有摘要、尚无概念的资料。
+        transaction.executeWithoutResult(status -> {
+            Document old = documents.findById(source.getId()).orElseThrow();
+            old.setConcepts(Set.of());
+            documents.save(old);
+        });
+        assertTrue(service.related(source.getId()).isEmpty());
+        String vectorVersion = jdbc.queryForObject("SELECT xmin::text FROM vector_store WHERE metadata ->> 'documentId' = ?", String.class, source.getId().toString());
+        service.retrySummary(source.getId());
+        context.getBean(ProcessDocument.class).processNext();
+        assertEquals(Set.of("事务"), service.get(source.getId()).getConcepts());
+        assertEquals(5, service.related(source.getId()).size());
+        assertEquals(vectorVersion, jdbc.queryForObject("SELECT xmin::text FROM vector_store WHERE metadata ->> 'documentId' = ?", String.class, source.getId().toString()));
+    }
+
+    private Document processedNote(String name, String content) {
+        Document document = service.createNote(name, content);
+        context.getBean(ProcessDocument.class).processNext();
+        return document;
     }
 
     private Document note(String name) { return service.createNote(name, "正文：" + name); }

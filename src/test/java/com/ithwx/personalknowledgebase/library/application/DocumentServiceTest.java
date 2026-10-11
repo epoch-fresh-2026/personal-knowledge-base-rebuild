@@ -3,6 +3,7 @@ package com.ithwx.personalknowledgebase.library.application;
 import com.ithwx.personalknowledgebase.library.domain.Document;
 import com.ithwx.personalknowledgebase.library.domain.DocumentDeleted;
 import com.ithwx.personalknowledgebase.library.domain.DocumentRepository;
+import com.ithwx.personalknowledgebase.library.domain.RelatedDocument;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -15,6 +16,8 @@ import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.NoSuchElementException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -23,6 +26,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @ExtendWith(MockitoExtension.class)
 class DocumentServiceTest {
@@ -45,6 +52,33 @@ class DocumentServiceTest {
                 repository, fileStorage, processDocument, eventPublisher);
         existingDocument = new Document();
         existingDocument.setId(1L);
+    }
+
+    @Test
+    void shouldLookUpAtMostFiveRelatedDocumentsForCurrentConcepts() {
+        existingDocument.setStatus("READY");
+        existingDocument.completeSummary("摘要");
+        existingDocument.setConcepts(Set.of("行锁"));
+        when(repository.findById(1L)).thenReturn(Optional.of(existingDocument));
+        var related = List.of(new RelatedDocument(2L, 1L, "并发控制", List.of("行锁")));
+        when(repository.findRelated(1L, Set.of("行锁"), 5)).thenReturn(related);
+        assertEquals(related, service.related(1L));
+    }
+
+    @Test
+    void shouldNotUseUnfinishedOrOldConceptsAndShouldReportDeletedDocument() {
+        when(repository.findById(1L)).thenReturn(Optional.of(existingDocument));
+        existingDocument.setConcepts(Set.of("旧概念"));
+        existingDocument.setStatus("PROCESSING");
+        assertEquals(List.of(), service.related(1L));
+        existingDocument.setStatus("READY");
+        existingDocument.setSummaryStatus("PROCESSING");
+        assertEquals(List.of(), service.related(1L));
+        existingDocument.completeSummary("旧资料只有摘要");
+        existingDocument.setConcepts(Set.of());
+        assertEquals(List.of(), service.related(1L));
+        verify(repository, never()).findRelated(anyLong(), any(), anyInt());
+        assertThrows(NoSuchElementException.class, () -> service.related(2L));
     }
 
     @Test

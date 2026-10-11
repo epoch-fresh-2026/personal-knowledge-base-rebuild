@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -87,7 +88,7 @@ class IngestionCommitterTest {
         assertFalse(committer.indexed(10L, "old", new PreparedIndex(1L, List.of())));
         assertTrue(committer.extracted(10L, "old", new DocumentExtractor.Result("旧", "正文", null)).isEmpty());
         committer.fail(10L, "old", "旧错误");
-        assertFalse(committer.summarized(10L, "old", "旧摘要"));
+        assertFalse(committer.summarized(10L, "old", new SummarizeDocument.Result("旧摘要", Set.of("旧概念"))));
         verifyNoInteractions(documents, index);
         verify(jobs, never()).save(any());
     }
@@ -114,8 +115,9 @@ class IngestionCommitterTest {
         job.setStage(IngestionStage.SUMMARIZING);
         document.setStatus("READY");
         document.setContent("原文");
-        assertTrue(committer.summarized(10L, "worker", "摘要"));
+        assertTrue(committer.summarized(10L, "worker", new SummarizeDocument.Result("摘要", Set.of("行锁"))));
         assertEquals("摘要", document.getSummary());
+        assertEquals(Set.of("行锁"), document.getConcepts());
         assertEquals("READY", document.getSummaryStatus());
         assertEquals("原文", document.getContent());
         assertEquals("READY", document.getStatus());

@@ -20,6 +20,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -65,7 +66,8 @@ class ProcessDocumentTest {
         PreparedIndex prepared = new PreparedIndex(1L, List.of());
         when(indexDocument.prepare(any())).thenReturn(prepared);
         when(committer.indexed(10L, owner, prepared)).thenReturn(true);
-        when(summarizer.summarize("正文")).thenReturn("摘要");
+        var summary = new SummarizeDocument.Result("摘要", Set.of("事务"));
+        when(summarizer.summarize("正文")).thenReturn(summary);
         worker.process(job, owner);
         var order = inOrder(committer, extractor, indexDocument, summarizer);
         order.verify(committer).start(10L, owner);
@@ -74,7 +76,7 @@ class ProcessDocumentTest {
         order.verify(indexDocument).prepare(any());
         order.verify(committer).indexed(10L, owner, prepared);
         order.verify(summarizer).summarize("正文");
-        order.verify(committer).summarized(10L, owner, "摘要");
+        order.verify(committer).summarized(10L, owner, summary);
         verify(lease).close();
     }
 
@@ -178,10 +180,11 @@ class ProcessDocumentTest {
         stubLease();
         when(lease.isValid()).thenReturn(true);
         job.setStage(IngestionStage.SUMMARIZING);
-        when(summarizer.summarize("正文")).thenReturn("已恢复的摘要");
+        var summary = new SummarizeDocument.Result("已恢复的摘要", Set.of("事务"));
+        when(summarizer.summarize("正文")).thenReturn(summary);
         worker.process(job, owner);
         verifyNoInteractions(extractor, indexDocument);
-        verify(committer).summarized(10L, owner, "已恢复的摘要");
+        verify(committer).summarized(10L, owner, summary);
         verify(lease).close();
     }
 
@@ -190,9 +193,9 @@ class ProcessDocumentTest {
         stubLease();
         job.setStage(IngestionStage.SUMMARIZING);
         when(lease.isValid()).thenReturn(true, true, false);
-        when(summarizer.summarize("正文")).thenReturn("迟到摘要");
+        when(summarizer.summarize("正文")).thenReturn(new SummarizeDocument.Result("迟到摘要", Set.of("事务")));
         worker.process(job, owner);
-        verify(committer, never()).summarized(anyLong(), anyString(), anyString());
+        verify(committer, never()).summarized(anyLong(), anyString(), any());
         verifyNoInteractions(indexDocument, extractor);
     }
 

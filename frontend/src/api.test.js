@@ -18,6 +18,12 @@ test("request reports network failures in Chinese", async t => {
     await assert.rejects(request("/api/documents"), /无法连接服务器，请检查服务和网络后重试/);
 });
 
+test("request preserves cancellation so summary waiting can stop", async t => {
+    const abort = new DOMException("已停止", "AbortError");
+    t.mock.method(globalThis, "fetch", async () => { throw abort; });
+    await assert.rejects(request("/api/documents/38/summary"), error => error === abort);
+});
+
 test("request reports oversized uploads in Chinese even when response is not JSON", async t => {
     const fetch = t.mock.method(globalThis, "fetch", async () => new Response("Request too large", {status: 413}));
     await assert.rejects(request("/api/documents"), /文件超过上传大小限制/);

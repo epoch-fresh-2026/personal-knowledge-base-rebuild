@@ -23,6 +23,7 @@ import org.springframework.ai.openai.OpenAiChatOptions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -54,7 +55,9 @@ class SummarizeDocumentTest {
             return response(" 主题：事务与行锁。 ");
         });
 
-        assertEquals("主题：事务与行锁。", summarizer.summarize(content));
+        SummarizeDocument.Result result = summarizer.summarize(content);
+        assertEquals("主题：事务与行锁。", result.summary());
+        assertEquals(Set.of("行锁"), result.concepts());
         verify(chatModel, times(1)).call(any(Prompt.class));
     }
 
@@ -66,7 +69,7 @@ class SummarizeDocumentTest {
                 .choices(List.of(ChatCompletion.Choice.builder().index(0L)
                         .finishReason(ChatCompletion.Choice.FinishReason.STOP)
                         .logprobs(Optional.empty())
-                        .message(ChatCompletionMessage.builder().content("主题：数据库事务。")
+                        .message(ChatCompletionMessage.builder().content("{\"summary\":\"主题：数据库事务。\",\"concepts\":[\"事务\"]}")
                                 .refusal(Optional.empty()).build())
                         .build()))
                 .build();
@@ -79,7 +82,7 @@ class SummarizeDocumentTest {
                 .openAiClient(client).openAiClientAsync(mock(OpenAIClientAsync.class))
                 .options(options).build();
 
-        assertEquals("主题：数据库事务。", new SummarizeDocument(model).summarize("资料讲解数据库事务。"));
+        assertEquals("主题：数据库事务。", new SummarizeDocument(model).summarize("资料讲解数据库事务。").summary());
         ArgumentCaptor<ChatCompletionCreateParams> request = ArgumentCaptor.forClass(ChatCompletionCreateParams.class);
         verify(client.chat().completions()).create(request.capture(), any(RequestOptions.class));
         assertEquals("test-model", request.getValue().model().asString());
@@ -98,9 +101,9 @@ class SummarizeDocumentTest {
             return response("摘要" + inputs.size());
         });
 
-        assertEquals("摘要4", summarizer.summarize(original));
+        assertEquals("摘要4", summarizer.summarize(original).summary());
         assertEquals(original, String.join("", inputs.subList(0, 3)));
-        assertEquals("摘要1\n\n摘要2\n\n摘要3", inputs.get(3));
+        assertEquals("摘要1\n关键概念：行锁\n\n摘要2\n关键概念：行锁\n\n摘要3\n关键概念：行锁", inputs.get(3));
     }
 
     @Test
@@ -124,11 +127,11 @@ class SummarizeDocumentTest {
             return response("摘要" + inputs.size());
         });
 
-        assertEquals("摘要14", summarizer.summarize("字".repeat(60_000)));
+        assertEquals("摘要14", summarizer.summarize("字".repeat(60_000)).summary());
         assertEquals(60_000, inputs.subList(0, 10).stream().mapToInt(String::length).sum());
-        assertEquals("摘要1\n\n摘要2\n\n摘要3\n\n摘要4", inputs.get(10));
-        assertEquals("摘要9\n\n摘要10", inputs.get(12));
-        assertEquals("摘要11\n\n摘要12\n\n摘要13", inputs.get(13));
+        assertEquals("摘要1\n关键概念：行锁\n\n摘要2\n关键概念：行锁\n\n摘要3\n关键概念：行锁\n\n摘要4\n关键概念：行锁", inputs.get(10));
+        assertEquals("摘要9\n关键概念：行锁\n\n摘要10\n关键概念：行锁", inputs.get(12));
+        assertEquals("摘要11\n关键概念：行锁\n\n摘要12\n关键概念：行锁\n\n摘要13\n关键概念：行锁", inputs.get(13));
     }
 
     @Test
@@ -146,6 +149,38 @@ class SummarizeDocumentTest {
     }
 
     private ChatResponse response(String text) {
-        return new ChatResponse(List.of(new Generation(new AssistantMessage(text))));
+        return responseJson("{\"summary\":\"" + text + "\",\"concepts\":[\"行锁\"]}");
+    }
+
+    private ChatResponse responseJson(String json) {
+        return new ChatResponse(List.of(new Generation(new AssistantMessage(json))));
+    }
+
+    @Test
+    void shouldNormalizeConceptsAtModelBoundaryOnly() {
+        when(chatModel.call(any(Prompt.class))).thenReturn(responseJson("""
+                {"summary":" 摘要 ","concepts":[" SQL ","sql"," 行锁 ","","  "]}
+                """));
+        var result = summarizer.summarize("SQL 与行锁");
+        assertEquals("摘要", result.summary());
+        assertEquals(Set.of("sql", "行锁"), result.concepts());
+        verify(chatModel, times(1)).call(any(Prompt.class));
+    }
+
+    @Test
+    void shouldLimitConceptsAndAllowNoConceptForUnstructuredText() {
+        var result = new SummarizeDocument.Result("摘要", Set.of("甲", "乙", "丙", "丁", "戊", "己", "庚"));
+        assertEquals(6, result.concepts().size());
+        when(chatModel.call(any(Prompt.class))).thenReturn(responseJson("{\"summary\":\"摘要\",\"concepts\":[]}"));
+        assertTrue(summarizer.summarize("随笔").concepts().isEmpty());
+    }
+
+    @Test
+    void shouldReportMalformedModelOutputWithoutInventingConcepts() {
+        when(chatModel.call(any(Prompt.class))).thenReturn(responseJson("这不是 JSON"));
+        assertEquals("摘要或关键概念格式不正确，请重试总结",
+                assertThrows(IllegalStateException.class, () -> summarizer.summarize("正文")).getMessage());
+        when(chatModel.call(any(Prompt.class))).thenReturn(responseJson("{\"summary\":\"摘要\"}"));
+        assertThrows(IllegalStateException.class, () -> summarizer.summarize("正文"));
     }
 }

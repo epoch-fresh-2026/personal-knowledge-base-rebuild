@@ -5,6 +5,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.util.Set;
 
 @Getter
 @Setter
@@ -20,6 +21,7 @@ public class Document {
     private String contentHash;
     private String content;
     private String summary;
+    private Set<String> concepts = Set.of();
     private String summaryStatus;
     private String summaryFailureReason;
     private String failureReason;
@@ -37,6 +39,7 @@ public class Document {
 
     public void prepareSummary() {
         summary = null;
+        concepts = Set.of();
         summaryStatus = "PENDING";
         summaryFailureReason = null;
     }
@@ -54,6 +57,7 @@ public class Document {
 
     public void failSummary(String reason) {
         summary = null;
+        concepts = Set.of();
         summaryStatus = "FAILED";
         summaryFailureReason = reason;
     }

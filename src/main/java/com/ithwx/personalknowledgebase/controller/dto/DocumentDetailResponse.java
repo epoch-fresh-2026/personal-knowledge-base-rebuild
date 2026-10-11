@@ -3,6 +3,7 @@ package com.ithwx.personalknowledgebase.controller.dto;
 import com.ithwx.personalknowledgebase.library.domain.Document;
 
 import java.time.LocalDateTime;
+import java.util.Set;
 
 public record DocumentDetailResponse(
         Long id,
@@ -14,7 +15,8 @@ public record DocumentDetailResponse(
         Integer chunkCount,
         String failureReason,
         LocalDateTime uploadTime,
-        String content
+        String content,
+        Set<String> concepts
 ) {
     public static DocumentDetailResponse from(Document document) {
         return new DocumentDetailResponse(
@@ -27,7 +29,8 @@ public record DocumentDetailResponse(
                 document.getChunkCount(),
                 document.getFailureReason(),
                 document.getUploadTime(),
-                document.getContent()
+                document.getContent(),
+                document.getConcepts()
         );
     }
 }

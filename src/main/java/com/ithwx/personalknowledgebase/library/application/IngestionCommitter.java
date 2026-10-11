@@ -106,7 +106,7 @@ public class IngestionCommitter {
     }
 
     @Transactional
-    public boolean summarized(Long jobId, String owner, String summary) {
+    public boolean summarized(Long jobId, String owner, SummarizeDocument.Result result) {
         Optional<IngestionJob> owned = jobs.findOwnedForUpdate(jobId, owner);
         if (owned.isEmpty() || owned.get().getStage() != IngestionStage.SUMMARIZING) {
             return false;
@@ -117,7 +117,8 @@ public class IngestionCommitter {
         }
         // 和索引一样，先验证任务身份，再写入；删改后的旧结果不会写回。
         Document document = documents.findById(job.getDocumentId()).orElseThrow();
-        document.completeSummary(summary);
+        document.completeSummary(result.summary());
+        document.setConcepts(result.concepts());
         documents.save(document);
         jobs.save(job);
         return true;

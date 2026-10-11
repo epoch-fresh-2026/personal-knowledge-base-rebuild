@@ -105,7 +105,7 @@ class ProcessDocument {
             }
             if (lease.isValid()) {
                 // 索引已经可用；模型调用仍在事务外执行，失败只影响摘要。
-                String summary = summarizer.summarize(document.getContent());
+                SummarizeDocument.Result summary = summarizer.summarize(document.getContent());
                 if (lease.isValid()) {
                     committer.summarized(job.getId(), leaseOwner, summary);
                 }

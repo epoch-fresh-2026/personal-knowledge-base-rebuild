@@ -3,6 +3,7 @@ package com.ithwx.personalknowledgebase.controller;
 import com.ithwx.personalknowledgebase.common.GlobalExceptionHandler;
 import com.ithwx.personalknowledgebase.library.application.DocumentService;
 import com.ithwx.personalknowledgebase.library.domain.Document;
+import com.ithwx.personalknowledgebase.library.domain.RelatedDocument;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,6 +17,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
+import java.util.NoSuchElementException;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
@@ -52,7 +55,8 @@ class DocumentControllerTest {
         mockMvc.perform(get("/api/documents/1/summary"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.summary").value("事务保证操作作为一个整体完成。"))
-                .andExpect(jsonPath("$.status").value("READY"));
+                .andExpect(jsonPath("$.status").value("READY"))
+                .andExpect(jsonPath("$.documentStatus").value("READY"));
 
         saved.prepareSummary();
         when(service.retrySummary(1L)).thenReturn(saved);
@@ -64,6 +68,20 @@ class DocumentControllerTest {
         mockMvc.perform(post("/api/documents/2/summary"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("请等待资料完成解析与索引后再总结"));
+    }
+
+    @Test
+    void shouldExposeParsingFailureWhileSummaryIsStillPending() throws Exception {
+        Document failed = document(1L, "空白.pdf", "pdf");
+        failed.prepareSummary();
+        failed.markFailed("文件没有可提取的文字");
+        when(service.get(1L)).thenReturn(failed);
+
+        mockMvc.perform(get("/api/documents/1/summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.documentStatus").value("FAILED"))
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.failureReason").value("文件没有可提取的文字"));
     }
 
     @Test
@@ -124,6 +142,7 @@ class DocumentControllerTest {
     void shouldListAndReadDetail() throws Exception {
         Document document = document(1L, "学习笔记", "note");
         document.setContent("完整正文");
+        document.setConcepts(Set.of("行锁"));
         when(service.list()).thenReturn(List.of(document));
         when(service.get(1L)).thenReturn(document);
 
@@ -134,7 +153,25 @@ class DocumentControllerTest {
 
         mockMvc.perform(get("/api/documents/1"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content").value("完整正文"));
+                .andExpect(jsonPath("$.content").value("完整正文"))
+                .andExpect(jsonPath("$.concepts[0]").value("行锁"));
+    }
+
+    @Test
+    void shouldExposeRelatedDocumentsWithSharedConceptsAndMissingSourceAs404() throws Exception {
+        when(service.related(1L)).thenReturn(List.of(new RelatedDocument(2L, 3L, "并发控制", List.of("行锁"))));
+        mockMvc.perform(get("/api/documents/1/related"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(2))
+                .andExpect(jsonPath("$[0].version").value(3))
+                .andExpect(jsonPath("$[0].name").value("并发控制"))
+                .andExpect(jsonPath("$[0].sharedConcepts[0]").value("行锁"))
+                .andExpect(jsonPath("$[0].content").doesNotExist());
+        when(service.related(2L)).thenReturn(List.of());
+        mockMvc.perform(get("/api/documents/2/related"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+        when(service.related(3L)).thenThrow(new NoSuchElementException("资料不存在：3"));
+        mockMvc.perform(get("/api/documents/3/related")).andExpect(status().isNotFound());
     }
 
     @Test
