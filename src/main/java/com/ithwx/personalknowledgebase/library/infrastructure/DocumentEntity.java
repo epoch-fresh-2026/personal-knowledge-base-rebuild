@@ -49,6 +49,15 @@ public class DocumentEntity {
     @Column(columnDefinition = "TEXT")
     private String content;
 
+    @Column(columnDefinition = "TEXT")
+    private String summary;
+
+    @Column(name = "summary_status", length = 32)
+    private String summaryStatus;
+
+    @Column(name = "summary_failure_reason", length = 1000)
+    private String summaryFailureReason;
+
     @Column(name = "upload_time", nullable = false)
     private LocalDateTime uploadTime;
 

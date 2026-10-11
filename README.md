@@ -2,50 +2,56 @@
 
 一个面向大学生期末复习的 RAG 知识库。
 
-学生可以录入课程讲义、学习笔记和参考网页，用自然语言查找知识，并通过回答来源核对原文。资料中没有足够依据时，系统会明确拒答。
+录入课程资料、笔记和网页，通过问答查找知识、核对原文，也可以生成自测题。资料依据不足时，系统会拒答。
 
 ## 功能
 
-- 解析 TXT、Markdown、PDF 和 DOCX
-- 录入学习笔记和公开参考网页
-- 文本切分、向量化和 pgvector 存储
-- 资料查询、修改、替换和删除
-- 向量与关键词检索、RRF 排名融合、模型重排、Agent 按需二次检索、无依据拒答和来源追踪
-- 问答会话保存与刷新恢复
-- 流式显示回答、检索阶段提示和停止生成
-- 资料管理、知识问答和知识自测页面
-- 基于知识库生成练习题，记录错题并支持重新练习
+- 多格式文字解析，支持笔记和公开网页
+- 资料查询、编辑、替换、删除和失败重试
+- 后台入库、异常退出后恢复、自动生成并保存摘要
+- 向量与关键词检索、RRF 融合、模型重排
+- 有依据的问答、来源引用、会话保存
+- 流式回答、处理阶段提示和停止生成
+- 知识自测、错题记录和重练
 
 ## 核心流程
 
 ```text
-上传资料 → 创建持久化入库任务 → 解析与验重 → 文本切分 → 建立索引 → 资料变为 READY
+上传资料 → 解析与验重 → 建立索引（资料 READY）→ 自动总结并保存
+查看总结 → 读取数据库摘要，不再次调用模型
 
-用户提问 → 向量与关键词检索 → RRF 融合并限制候选 → 模型重排 → Agent 判断证据
-        → 必要时改写问题并再次检索 → 回答或拒答 → 保存会话
+提问 → 混合检索与重排 → 判断证据 → 回答或拒答 → 保存会话
+证据不足时最多改写问题、重新检索一次
 
-选择复习主题 → 基于知识库出题 → 作答与评分 → 错题重练 → 通过后移出错题
+选择主题 → 出题 → 作答评分 → 错题重练
 ```
 
-检索的两路结果用 RRF（Reciprocal Rank Fusion）融合：每路命中的片段贡献 `1 / (60 + 排名)`，排名从 1 开始，同一片段命中两路时累加贡献。按 `documentId + chunkIndex` 去重，同一路重复片段只计一次，并按去重后的排名计分；同分时按资料 ID、分块序号排序。它使用排名，不直接相加向量相似度与关键词相似度。[算法参考](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf)。
+RRF 按排名融合两路结果：每路贡献 `1 / (60 + 排名)`，相同片段累加。默认最多保留 10 个候选再重排，最终分数来自重排模型。[算法参考](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf)。
 
-每路最多取 `top-k × 2` 个候选，融合后也只保留 `top-k × 2` 个，再送给原有模型重排序。默认 `top-k=5`，因此重排序最多接收 10 个片段，而不是原来的两路合并后最多 20 个。RRF 分数只用于候选筛选；最终 `SearchResult.score` 仍是模型重排序的相关性分数。融合不增加模型调用，不改变问答接口、引用来源和上下文长度限制；是否改善真实回答质量仍需另外评测。
+入库任务保存处理阶段，使用行锁和心跳租约保护结果提交。重启后等待租约过期再恢复；删改后的旧任务不能写回结果。见 [入库安全说明](docs/ingestion-safety.md)。
 
-入库任务会保存解析、索引阶段和数据库租约。独立心跳在处理期间续租；服务异常退出后，过期任务会被重新领取并从最近的安全阶段继续执行。解析和向量计算在事务外完成，正文或索引的最终提交先锁定任务行并检查有效租约，再与资料/任务状态一起提交或回滚；已被接手或取消的旧 Worker 不能写入迟到结果。
+流式问答使用 SSE：`status` 为处理阶段、`delta` 为回答片段、`done` 为完整结果、`error` 为错误；不展示模型内部思维链。同一后端进程一次处理一个流式请求，忙时返回 503，连接超时为 5 分钟。失败或停止不保存半截回答，不支持断点续传；取消不保证供应商立即停止计费。
 
-所有资料处理都经过有界线程池。删除、编辑、替换和重试先锁定并失效旧任务，提交后才唤醒 Worker。索引按资料 ID 在事务中替换，并使用稳定分块 ID，恢复执行不会留下重复片段。模型调用可能重做，不保证只调用一次。
+## 文档解析与总结
 
-默认租约为 15 分钟，心跳间隔为 30 秒，向量请求每批最多 32 个分块；配置位于 `app.ingestion`。心跳间隔必须小于租约时长，异常退出后的接手需要等待剩余租期。详细流程和测试说明见 [入库并发安全设计](docs/ingestion-safety.md)。
+支持 `doc/docx`、`ppt/pptx`、`xls/xlsx`、`pdf`、`txt`、`md/markdown`、`csv/tsv`、`html/htm`、`rtf`、`odt/ods/odp`、`epub`。Apache Tika 提取文字，Markdown 转换为正文。
 
-问答页使用 `POST /api/chat/stream` 接收 SSE：`status` 表示实际处理阶段（检索、判断证据、二次检索、生成），`delta` 是模型实时返回的文本，`done` 包含已保存的完整回答和来源，`error` 表示生成失败。阶段提示不是模型内部思维链。普通 `POST /api/chat` 仍保持原有行为。
+单文件上限 20MB，请求总大小上限 25MB，超限返回 413 和中文提示。不启用 OCR，不支持密码解密；扫描件、图片文字及复杂排版不保证解析。
 
-流式问答在同一后端进程中一次只处理 1 个请求，不支持多请求同时生成或等待排队；忙时直接返回 503，提示稍后重试。前端仍然一次只发送一个问题。连接超时为 5 分钟。停止、断线或超时被服务端观察到后会取消任务并关闭模型流订阅；生成过程中失败不会保存半截回答，页面会标明“未完成”。断线只能在容器通知或下一次写入时被发现，且取消不保证模型供应商立即停止计费。完整生成才保存会话，但保存成功后若连接断开，客户端仍可能收不到 `done`；目前不做自动重试、断点续传或事件回放。
+- 入库后自动总结完整正文并保存到 `document` 表；点击“查看总结”只读数据库，支持 Markdown 显示，生成中每 2 秒轮询。
+- 摘要状态独立于资料状态：总结失败不影响检索，重试总结不重建索引。旧资料可手动补生成，启动时不批量补生成。
+- 编辑正文或替换文件会重新入库并生成新摘要；删除会取消旧任务。关闭摘要弹窗不取消任务。
+- 普通和流式聊天在证据充分时，读取最多三份命中文档的有效摘要作背景；摘要不作为证据、引用来源或检索打分依据，不额外调用总结模型。
+- 单次总结最多 60000 个 Java 字符；短文一次调用，长文每约 6000 字符分段、最多四份摘要一组合并，每次输出最多 512 Token。超限仅使摘要失败，不截断原文。
+
+自动总结不会缩短首次模型耗时，只避免重复查看时再次生成。摘要可能不准确，请核对原文。目前不支持仅凭文档名在聊天中获取全文摘要，知识自测暂不读取摘要。
 
 ## 技术栈
 
 - Java 17、Spring Boot、Maven
 - PostgreSQL、pgvector、Spring Data JPA
 - Spring AI
+- Apache Tika、CommonMark（文档文字解析）
 - Vue 3、Vite、HTML、CSS、JavaScript
 - Docker Compose、GitHub Actions
 
@@ -114,7 +120,7 @@ mvn spring-boot:run
 
 ## 测试和打包
 
-完整验证需要 Docker Desktop（或可用的 Docker Engine）。`mvn verify` 会自动启动并清理隔离的 PostgreSQL/pgvector 测试容器，不读取 `.env`，不使用业务数据库或真实模型 API；Docker 不可用时集成测试会失败，不会静默跳过。
+`mvn verify` 包含隔离 PostgreSQL/pgvector 集成测试，需要 Docker；不使用业务数据库或真实模型 API。
 
 ```powershell
 cd frontend
@@ -125,19 +131,11 @@ cd ..
 mvn verify
 ```
 
-只运行单元测试、不启动数据库容器：
+只运行后端单元测试用 `mvn test`，打包用 `mvn package -DskipTests`（先构建前端）。
 
-```powershell
-mvn test
-```
+测试覆盖入库恢复与并发安全、多格式解析、摘要保存与失败重试、检索融合、流式输出和前端交互。恢复测试针对应用进程异常退出，不包含数据库损坏或原文件丢失。
 
-真实数据库测试覆盖并发领取、跳过已锁任务、心跳续租、失效任务保护、索引与状态事务回滚、并发删除、编辑和文件替换失败。恢复测试会强制终止一个独立 JVM，再启动新 JVM，从持久化的 `INDEXING` 阶段继续并验证没有重复索引。这验证的是应用进程异常退出，不包含数据库磁盘损坏或原文件丢失。
-
-流式测试覆盖模型流逐段转发、订阅取消、SSE 超时、单请求执行与不排队、完整回答保存，以及前端汉字分块解码、提前显示、异常和停止生成。使用测试模型，不消耗真实 API Token。
-
-检索融合测试覆盖两路排名累计、跨路与单路去重、单路或空结果、同分排序、候选上限、实际检索接线，以及最终分数仍来自模型重排序。
-
-前端开发时也可以在 `frontend` 目录运行 `npm run dev`，然后访问 <http://localhost:5173>；Vite 会把 `/api` 请求转发到 8080 端口的 Spring Boot。GitHub Actions 会在创建 PR 和更新 `main` 时自动执行前端测试、构建前端并执行后端测试。
+前端开发：在 `frontend` 运行 `npm run dev`，访问 <http://localhost:5173>。GitHub Actions 会在 PR 和 `main` 更新时运行测试及构建。
 
 ## 主要接口
 
@@ -149,6 +147,8 @@ mvn test
 | `POST` | `/api/documents/links` | 收藏网页 |
 | `GET` | `/api/documents` | 查询资料列表 |
 | `GET` | `/api/documents/{id}` | 查询资料详情 |
+| `GET` | `/api/documents/{id}/summary` | 读取已保存摘要、生成状态与失败原因 |
+| `POST` | `/api/documents/{id}/summary` | 后台补生成或重试摘要，返回 202，不重建索引 |
 | `PUT` | `/api/documents/{id}` | 更新资料或替换文件 |
 | `POST` | `/api/documents/{id}/retry` | 重新处理失败资料 |
 | `DELETE` | `/api/documents/{id}` | 删除资料 |
@@ -162,19 +162,14 @@ mvn test
 
 ## 设计文档
 
-- [产品需求文档（Issue #1）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/1)
-- [产品架构设计（Issue #2）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/2)
-- [资料库模块（Issue #55）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/55)
-- [知识索引模块（Issue #60）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/60)
-- [知识问答模块（Issue #67）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/67)
-- [Vue 前端（Issue #74）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/74)
-- [知识自测（Issue #89）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/89)
-- [错题重练（Issue #91）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/91)
-- [可恢复入库（Issue #95）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/95)
-- [入库并发安全（Issue #97）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/97)
-- [流式问答与阶段提示（Issue #100）](https://github.com/epoch-fresh-2026/personal-knowledge-base-rebuild/issues/100)
-- [检索结果 RRF 融合（Issue #102）](https://github.com/epoch-fresh-2026/personal-knowledge-base-rebuild/issues/102)
-- [工程支持（Issue #24）](https://github.com/haiwangxing6666-a11y/personal-knowledge-base-rebuild/issues/24)
+- [产品需求文档（Issue #1）](https://github.com/epoch-fresh-2026/personal-knowledge-base-rebuild/issues/1)
+- [产品架构设计（Issue #2）](https://github.com/epoch-fresh-2026/personal-knowledge-base-rebuild/issues/2)
+- [资料库模块（Issue #55）](https://github.com/epoch-fresh-2026/personal-knowledge-base-rebuild/issues/55)
+- [知识索引模块（Issue #60）](https://github.com/epoch-fresh-2026/personal-knowledge-base-rebuild/issues/60)
+- [知识问答模块（Issue #67）](https://github.com/epoch-fresh-2026/personal-knowledge-base-rebuild/issues/67)
+- [Vue 前端（Issue #74）](https://github.com/epoch-fresh-2026/personal-knowledge-base-rebuild/issues/74)
+- [知识自测（Issue #89）](https://github.com/epoch-fresh-2026/personal-knowledge-base-rebuild/issues/89)
+- [工程支持（Issue #24）](https://github.com/epoch-fresh-2026/personal-knowledge-base-rebuild/issues/24)
 
 ## 密钥安全
 

@@ -36,6 +36,11 @@ public class JpaDocumentRepositoryAdapter implements DocumentRepository {
     }
 
     @Override
+    public List<Document> findByIds(List<Long> ids) {
+        return jpaRepository.findAllById(ids).stream().map(this::toDocument).toList();
+    }
+
+    @Override
     public boolean existsByContentHash(String hash) {
         return jpaRepository.existsByContentHash(hash);
     }
@@ -65,6 +70,9 @@ public class JpaDocumentRepositoryAdapter implements DocumentRepository {
         document.setSourceUrl(entity.getSourceUrl());
         document.setContentHash(entity.getContentHash());
         document.setContent(entity.getContent());
+        document.setSummary(entity.getSummary());
+        document.setSummaryStatus(entity.getSummaryStatus());
+        document.setSummaryFailureReason(entity.getSummaryFailureReason());
         document.setUploadTime(entity.getUploadTime());
         document.setStatus(entity.getStatus());
         document.setFailureReason(entity.getFailureReason());
@@ -82,6 +90,9 @@ public class JpaDocumentRepositoryAdapter implements DocumentRepository {
         entity.setSourceUrl(document.getSourceUrl());
         entity.setContentHash(document.getContentHash());
         entity.setContent(document.getContent());
+        entity.setSummary(document.getSummary());
+        entity.setSummaryStatus(document.getSummaryStatus());
+        entity.setSummaryFailureReason(document.getSummaryFailureReason());
         entity.setUploadTime(document.getUploadTime());
         entity.setStatus(document.getStatus());
         entity.setFailureReason(document.getFailureReason());

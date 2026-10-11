@@ -3,6 +3,7 @@ package com.ithwx.personalknowledgebase.library.infrastructure;
 import com.ithwx.personalknowledgebase.library.domain.IngestionJob;
 import com.ithwx.personalknowledgebase.library.domain.IngestionJobRepository;
 import com.ithwx.personalknowledgebase.library.domain.IngestionJobStatus;
+import com.ithwx.personalknowledgebase.library.domain.IngestionStage;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +28,20 @@ public class JpaIngestionJobRepositoryAdapter implements IngestionJobRepository 
         ensureRow(documentId);//保证记录存在，没有就新增
         IngestionJob job = requiredByDocumentIdForUpdate(documentId);//加锁读取这条记录，不存在就报错
         job.reset();
+        return toDomain(jpaRepository.saveAndFlush(toEntity(job)));
+    }
+
+    @Override
+    @Transactional
+    public IngestionJob restartSummary(Long documentId) {
+        ensureRow(documentId);
+        IngestionJob job = requiredByDocumentIdForUpdate(documentId);
+        // 查看或重复点击重试不抢走正在总结的 Worker 的租约。
+        if (job.getStage() == IngestionStage.SUMMARIZING
+                && (job.getStatus() == IngestionJobStatus.PENDING || job.getStatus() == IngestionJobStatus.RUNNING)) {
+            return job;
+        }
+        job.reset(IngestionStage.SUMMARIZING);
         return toDomain(jpaRepository.saveAndFlush(toEntity(job)));
     }
 

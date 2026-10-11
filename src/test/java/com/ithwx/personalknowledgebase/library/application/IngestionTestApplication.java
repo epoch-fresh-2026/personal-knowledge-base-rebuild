@@ -15,6 +15,7 @@ import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration;
 import org.springframework.boot.jdbc.autoconfigure.JdbcTemplateAutoConfiguration;
+import org.springframework.boot.jdbc.autoconfigure.DataSourceInitializationAutoConfiguration;
 import org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration;
 import org.springframework.boot.transaction.autoconfigure.TransactionAutoConfiguration;
 import org.springframework.boot.builder.SpringApplicationBuilder;
@@ -39,16 +40,21 @@ public final class IngestionTestApplication {
     private IngestionTestApplication() {}
 
     static ConfigurableApplicationContext open(String url, String username, String password, boolean blockEmbedding) {
+        return open(url, username, password, blockEmbedding, false);
+    }
+
+    static ConfigurableApplicationContext open(String url, String username, String password, boolean blockEmbedding, boolean blockSummary) {
         return new SpringApplicationBuilder(Config.class).web(WebApplicationType.NONE).logStartupInfo(false)
                 .run("--spring.config.location=classpath:ingestion-test.yaml",
                         "--spring.datasource.url=" + url, "--spring.datasource.username=" + username,
                         "--spring.datasource.password=" + password, "--test.block-embedding=" + blockEmbedding,
-                        "--app.ingestion.lease-duration=" + (blockEmbedding ? "2s" : "1m"));
+                        "--test.block-summary=" + blockSummary,
+                        "--app.ingestion.lease-duration=" + (blockEmbedding || blockSummary ? "2s" : "1m"));
     }
 
     @Configuration(proxyBeanMethods = false)
     @ImportAutoConfiguration({DataSourceAutoConfiguration.class, JdbcTemplateAutoConfiguration.class,
-            HibernateJpaAutoConfiguration.class, TransactionAutoConfiguration.class})
+            DataSourceInitializationAutoConfiguration.class, HibernateJpaAutoConfiguration.class, TransactionAutoConfiguration.class})
     @EntityScan(basePackageClasses = DocumentEntity.class)
     @EnableJpaRepositories(basePackages = "com.ithwx.personalknowledgebase.library.infrastructure")
     @Import({JpaDocumentRepositoryAdapter.class, JpaIngestionJobRepositoryAdapter.class,
@@ -79,6 +85,28 @@ public final class IngestionTestApplication {
                     return texts.stream().map(text -> vector()).toList();
                 }
                 private float[] vector() { return new float[]{1, 0, 0}; }
+            };
+        }
+
+        @Bean
+        SummarizeDocument summarizer(Environment environment) {
+            return new SummarizeDocument(null) {
+                @Override public String summarize(String content) {
+                    if (environment.getProperty("test.block-summary", Boolean.class, false)) {
+                        System.out.println("SUMMARY_CHECKPOINT");
+                        System.out.flush();
+                        try {
+                            new CountDownLatch(1).await();
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException(exception);
+                        }
+                    }
+                    if (content.contains("模拟总结失败")) {
+                        throw new IllegalStateException("模拟总结失败");
+                    }
+                    return "摘要：" + content;
+                }
             };
         }
 

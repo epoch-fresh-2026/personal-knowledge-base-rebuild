@@ -30,7 +30,7 @@ class JpaIngestionJobRepositoryAdapterTest {
     @BeforeEach
     void setUp() {
         adapter = new JpaIngestionJobRepositoryAdapter(jpaRepository);
-        when(jpaRepository.saveAndFlush(any(IngestionJobEntity.class)))
+        org.mockito.Mockito.lenient().when(jpaRepository.saveAndFlush(any(IngestionJobEntity.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
@@ -91,6 +91,28 @@ class JpaIngestionJobRepositoryAdapterTest {
         assertEquals(IngestionStage.EXTRACTING, recovered.getStage());
         assertEquals(IngestionJobStatus.PENDING, recovered.getStatus());
         verify(jpaRepository).saveAndFlush(any(IngestionJobEntity.class));
+    }
+
+    @Test
+    void shouldRetrySummaryWithoutRestartingExtraction() {
+        IngestionJobEntity entity = entity();
+        entity.setStage(IngestionStage.SUMMARIZING);
+        entity.setStatus(IngestionJobStatus.FAILED);
+        when(jpaRepository.findByDocumentIdForUpdate(1L)).thenReturn(Optional.of(entity));
+        IngestionJob job = adapter.restartSummary(1L);
+        assertEquals(IngestionStage.SUMMARIZING, job.getStage());
+        assertEquals(IngestionJobStatus.PENDING, job.getStatus());
+    }
+
+    @Test
+    void shouldNotResetRunningSummaryLeaseOnRepeatedRetry() {
+        IngestionJobEntity entity = entity();
+        entity.setStage(IngestionStage.SUMMARIZING);
+        entity.setStatus(IngestionJobStatus.RUNNING);
+        entity.setLeaseOwner("current");
+        when(jpaRepository.findByDocumentIdForUpdate(1L)).thenReturn(Optional.of(entity));
+        assertEquals("current", adapter.restartSummary(1L).getLeaseOwner());
+        org.mockito.Mockito.verify(jpaRepository, org.mockito.Mockito.never()).saveAndFlush(any());
     }
 
     private IngestionJobEntity entity() {

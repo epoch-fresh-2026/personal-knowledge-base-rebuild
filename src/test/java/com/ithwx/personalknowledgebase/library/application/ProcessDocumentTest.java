@@ -34,6 +34,7 @@ class ProcessDocumentTest {
     @Mock private IngestionCommitter committer;
     @Mock private IngestionHeartbeat heartbeat;
     @Mock private IngestionHeartbeat.Lease lease;
+    @Mock private SummarizeDocument summarizer;
     private ProcessDocument worker;
     private Document document;
     private IngestionJob job;
@@ -42,7 +43,7 @@ class ProcessDocumentTest {
     @BeforeEach
     void setUp() {
         worker = new ProcessDocument(repository, jobs, extractor, indexDocument, executor,
-                Duration.ofMinutes(15), committer, heartbeat);
+                Duration.ofMinutes(15), committer, heartbeat, summarizer);
         document = new Document();
         document.setId(1L);
         document.setName("笔记.txt");
@@ -63,13 +64,17 @@ class ProcessDocumentTest {
         when(committer.extracted(10L, owner, result)).thenReturn(Optional.of(document));
         PreparedIndex prepared = new PreparedIndex(1L, List.of());
         when(indexDocument.prepare(any())).thenReturn(prepared);
+        when(committer.indexed(10L, owner, prepared)).thenReturn(true);
+        when(summarizer.summarize("正文")).thenReturn("摘要");
         worker.process(job, owner);
-        var order = inOrder(committer, extractor, indexDocument);
+        var order = inOrder(committer, extractor, indexDocument, summarizer);
         order.verify(committer).start(10L, owner);
         order.verify(extractor).extract(document);
         order.verify(committer).extracted(10L, owner, result);
         order.verify(indexDocument).prepare(any());
         order.verify(committer).indexed(10L, owner, prepared);
+        order.verify(summarizer).summarize("正文");
+        order.verify(committer).summarized(10L, owner, "摘要");
         verify(lease).close();
     }
 
@@ -166,6 +171,42 @@ class ProcessDocumentTest {
         worker.resumeUnfinishedDocuments();
         verify(jobs).ensureExists(1L);
         verify(executor).execute(any(Runnable.class));
+    }
+
+    @Test
+    void shouldResumeSummaryWithoutExtractingOrEmbeddingAgain() {
+        stubLease();
+        when(lease.isValid()).thenReturn(true);
+        job.setStage(IngestionStage.SUMMARIZING);
+        when(summarizer.summarize("正文")).thenReturn("已恢复的摘要");
+        worker.process(job, owner);
+        verifyNoInteractions(extractor, indexDocument);
+        verify(committer).summarized(10L, owner, "已恢复的摘要");
+        verify(lease).close();
+    }
+
+    @Test
+    void shouldDiscardSummaryAfterLosingLease() {
+        stubLease();
+        job.setStage(IngestionStage.SUMMARIZING);
+        when(lease.isValid()).thenReturn(true, true, false);
+        when(summarizer.summarize("正文")).thenReturn("迟到摘要");
+        worker.process(job, owner);
+        verify(committer, never()).summarized(anyLong(), anyString(), anyString());
+        verifyNoInteractions(indexDocument, extractor);
+    }
+
+    @Test
+    void shouldRetryOnlySummaryForReadyDocument() {
+        document.setStatus("READY");
+        document.failSummary("模型超时");
+        when(repository.findById(1L)).thenReturn(Optional.of(document));
+        when(repository.save(document)).thenReturn(document);
+        worker.retrySummary(1L);
+        verify(jobs).restartSummary(1L);
+        verify(jobs, never()).restart(anyLong());
+        org.junit.jupiter.api.Assertions.assertEquals("READY", document.getStatus());
+        org.junit.jupiter.api.Assertions.assertEquals("PENDING", document.getSummaryStatus());
     }
 
     private void stubLease() {

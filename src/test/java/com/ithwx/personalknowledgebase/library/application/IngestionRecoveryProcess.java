@@ -8,9 +8,10 @@ import java.time.Duration;
 public final class IngestionRecoveryProcess {
     public static void main(String[] args) throws Exception {
         boolean crash = "crash".equals(args[3]);
-        try (var context = IngestionTestApplication.open(args[0], args[1], args[2], crash)) {
+        boolean crashSummary = "crash-summary".equals(args[3]);
+        try (var context = IngestionTestApplication.open(args[0], args[1], args[2], crash, crashSummary)) {
             ProcessDocument worker = context.getBean(ProcessDocument.class);
-            if (crash) {
+            if (crash || crashSummary) {
                 worker.processNext(); // 在模型替身处阻塞，父进程强制终止，不执行 shutdown hook。
                 throw new IllegalStateException("故障进程未到达阻塞点");
             }

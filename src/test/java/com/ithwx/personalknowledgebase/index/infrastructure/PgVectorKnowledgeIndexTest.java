@@ -77,24 +77,6 @@ class PgVectorKnowledgeIndexTest {
     }
 
     @Test
-    void shouldNotCountRepeatedChunkWithinOneRouteTwice() {
-        KnowledgeChunk repeated = chunk(1L, 0, "单路重复");
-        KnowledgeChunk both = chunk(2L, 0, "真正两路命中");
-        assertEquals(List.of(both, repeated),
-                index.fuse(List.of(repeated, repeated, repeated, both), List.of(both), 10));
-    }
-
-    @Test
-    void shouldRankAfterDeduplicatingEachRoute() {
-        KnowledgeChunk first = chunk(3L, 0, "向量第一");
-        KnowledgeChunk second = chunk(1L, 0, "向量去重后第二");
-        KnowledgeChunk keywordFirst = chunk(4L, 0, "关键词第一");
-        KnowledgeChunk keywordSecond = chunk(2L, 0, "关键词第二");
-        assertEquals(List.of(first, keywordFirst, second, keywordSecond), index.fuse(
-                List.of(first, first, second), List.of(keywordFirst, keywordSecond), 10));
-    }
-
-    @Test
     void shouldKeepSingleRouteRankWhenOtherRouteIsEmpty() {
         List<KnowledgeChunk> ranked = List.of(chunk(3L, 0, "第一"), chunk(1L, 0, "第二"));
         assertEquals(ranked, index.fuse(ranked, List.of(), 10));

@@ -17,11 +17,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.StringJoiner;
@@ -156,15 +154,11 @@ public class PgVectorKnowledgeIndex implements KnowledgeIndex {
             int candidateLimit
     ) {
         Map<String, FusedChunk> fused = new LinkedHashMap<>();
+        // 当前单路检索不重复返回同一分块，直接按原排名计分。
         for (List<KnowledgeChunk> results : List.of(vectorResults, keywordResults)) {
-            Set<String> seen = new HashSet<>();
             int rank = 0;
             for (KnowledgeChunk chunk : results) {
                 String key = chunk.documentId() + ":" + chunk.chunkIndex();
-                // 同一路重复片段只计一次，去重后从第 1 名开始排名。
-                if (!seen.add(key)) {
-                    continue;
-                }
                 rank++;
                 // 按排名计分，不直接相加两路含义不同的原始相似度。
                 double score = 1.0 / (RRF_K + rank);

@@ -8,6 +8,8 @@ public interface IngestionJobRepository {
 
     IngestionJob restart(Long documentId);
 
+    IngestionJob restartSummary(Long documentId);
+
     IngestionJob ensureExists(Long documentId);
 
     Optional<IngestionJob> claimNext(

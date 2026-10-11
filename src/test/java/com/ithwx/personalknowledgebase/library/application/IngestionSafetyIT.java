@@ -163,6 +163,7 @@ class IngestionSafetyIT {
         assertTrue(committer.indexed(current.getId(), "new", prepared(document, "新结果")));
         assertEquals("新结果", jdbc.queryForObject("SELECT content FROM vector_store", String.class));
         assertEquals("READY", documents.findById(document.getId()).orElseThrow().getStatus());
+        assertTrue(committer.summarized(current.getId(), "new", "新摘要"));
         assertEquals("COMPLETED", status(current));
     }
 
@@ -305,6 +306,80 @@ class IngestionSafetyIT {
         assertEquals(1, vectorCount());
     }
 
+    @Test
+    void shouldPersistAutomaticSummaryAndKeepReadyOnSummaryFailure() {
+        Document document = note("自动总结");
+        context.getBean(ProcessDocument.class).processNext();
+        Document saved = documents.findById(document.getId()).orElseThrow();
+        assertEquals("READY", saved.getSummaryStatus());
+        assertEquals("摘要：正文：自动总结", saved.getSummary());
+        assertEquals(saved.getSummary(), service.get(document.getId()).getSummary());
+
+        Document failed = note("模拟总结失败");
+        context.getBean(ProcessDocument.class).processNext();
+        Document result = documents.findById(failed.getId()).orElseThrow();
+        assertEquals("READY", result.getStatus());
+        assertEquals("FAILED", result.getSummaryStatus());
+        assertNotNull(result.getContentHash());
+        assertEquals(2, vectorCount());
+        service.retrySummary(failed.getId());
+        assertEquals("SUMMARIZING", jdbc.queryForObject("SELECT stage FROM ingestion_job WHERE document_id = ?", String.class, failed.getId()));
+    }
+
+    @Test
+    void shouldRejectLateSummariesAfterDeletionOrEdit() {
+        Document deleted = note("总结时删除");
+        IngestionJob first = indexingJob(deleted, "old");
+        assertTrue(committer.indexed(first.getId(), "old", prepared(deleted, "原文")));
+        service.delete(deleted.getId());
+        assertFalse(committer.summarized(first.getId(), "old", "已删除的摘要"));
+        assertTrue(documents.findById(deleted.getId()).isEmpty());
+
+        Document edited = note("总结时编辑");
+        IngestionJob second = indexingJob(edited, "old");
+        assertTrue(committer.indexed(second.getId(), "old", prepared(edited, "原文")));
+        service.update(edited.getId(), "新资料", "新正文");
+        assertFalse(committer.summarized(second.getId(), "old", "旧正文的摘要"));
+        assertNull(documents.findById(edited.getId()).orElseThrow().getSummary());
+        context.getBean(ProcessDocument.class).processNext();
+        assertEquals("摘要：新正文", documents.findById(edited.getId()).orElseThrow().getSummary());
+    }
+
+    @Test
+    void shouldRecoverSummaryCheckpointAfterForcedProcessExitWithoutReindexing() throws Exception {
+        Document document = note("总结进程恢复");
+        try (Child worker = child("crash-summary")) {
+            assertTrue(worker.checkpoint.await(45, TimeUnit.SECONDS), worker.output.toString());
+            assertEquals("SUMMARIZING", jdbc.queryForObject("SELECT stage FROM ingestion_job", String.class));
+            assertEquals("READY", documents.findById(document.getId()).orElseThrow().getStatus());
+            assertEquals(1, vectorCount());
+            worker.process.destroyForcibly();
+            assertTrue(worker.process.waitFor(10, TimeUnit.SECONDS));
+        }
+        // 若重新建立索引，vector_store 的行版本会变化；摘要恢复不应触碰它。
+        String vectorVersion = jdbc.queryForObject("SELECT xmin::text FROM vector_store", String.class);
+        try (Child restarted = child("recover")) {
+            assertTrue(restarted.process.waitFor(45, TimeUnit.SECONDS), restarted.output.toString());
+            restarted.reader.get(5, TimeUnit.SECONDS);
+            assertEquals(0, restarted.process.exitValue(), restarted.output.toString());
+        }
+        assertEquals(vectorVersion, jdbc.queryForObject("SELECT xmin::text FROM vector_store", String.class));
+        assertEquals("READY", documents.findById(document.getId()).orElseThrow().getSummaryStatus());
+        assertEquals("摘要：正文：总结进程恢复", documents.findById(document.getId()).orElseThrow().getSummary());
+    }
+
+    @Test
+    void shouldUpgradeOldStageConstraintAndAllowSummaryCheckpoint() {
+        jdbc.execute("ALTER TABLE ingestion_job DROP CONSTRAINT ingestion_job_stage_check");
+        jdbc.execute("ALTER TABLE ingestion_job ADD CONSTRAINT ingestion_job_stage_check CHECK (stage IN ('EXTRACTING', 'INDEXING', 'COMPLETED'))");
+        new org.springframework.jdbc.datasource.init.ResourceDatabasePopulator(
+                new org.springframework.core.io.ClassPathResource("schema.sql")).execute(jdbc.getDataSource());
+        Document document = note("旧数据库升级");
+        IngestionJob job = indexingJob(document, "worker");
+        assertTrue(committer.indexed(job.getId(), "worker", prepared(document, "正文")));
+        assertEquals("SUMMARIZING", jdbc.queryForObject("SELECT stage FROM ingestion_job", String.class));
+    }
+
     private Document note(String name) { return service.createNote(name, "正文：" + name); }
     private Optional<IngestionJob> claim(String owner) {
         LocalDateTime now = LocalDateTime.now();
@@ -349,7 +424,7 @@ class IngestionSafetyIT {
                     String line;
                     while ((line = lines.readLine()) != null) {
                         output.append(line).append('\n');
-                        if (line.contains("INDEXING_CHECKPOINT")) { checkpoint.countDown(); }
+                        if (line.contains("INDEXING_CHECKPOINT") || line.contains("SUMMARY_CHECKPOINT")) { checkpoint.countDown(); }
                     }
                 } catch (Exception exception) { output.append(exception.toString()); }
             });

@@ -26,6 +26,7 @@ class JpaDocumentRepositoryAdapterTest {
         input.setContent("正文");
         input.setContentHash("abc");
         input.setStatus("READY");
+        input.completeSummary("事务摘要");
         input.setChunkCount(2);
 
         when(jpaRepository.saveAndFlush(any(DocumentEntity.class))).thenAnswer(invocation -> {
@@ -33,6 +34,8 @@ class JpaDocumentRepositoryAdapterTest {
             assertEquals("Java 笔记", entity.getName());
             assertEquals("正文", entity.getContent());
             assertEquals("abc", entity.getContentHash());
+            assertEquals("事务摘要", entity.getSummary());
+            assertEquals("READY", entity.getSummaryStatus());
             entity.setId(1L);
             entity.setVersion(0L);
             return entity;
@@ -48,6 +51,8 @@ class JpaDocumentRepositoryAdapterTest {
         assertEquals("正文", saved.getContent());
         assertEquals("abc", saved.getContentHash());
         assertEquals("READY", saved.getStatus());
+        assertEquals("事务摘要", saved.getSummary());
+        assertEquals("READY", saved.getSummaryStatus());
         assertEquals(2, saved.getChunkCount());
     }
 }

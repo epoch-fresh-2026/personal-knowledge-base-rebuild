@@ -6,6 +6,8 @@ import com.ithwx.personalknowledgebase.library.domain.DocumentRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -43,6 +45,30 @@ class DocumentServiceTest {
                 repository, fileStorage, processDocument, eventPublisher);
         existingDocument = new Document();
         existingDocument.setId(1L);
+    }
+
+    @Test
+    void shouldReplaceWithPowerPointAndQueueExtraction() throws Exception {
+        stubSavingWithId();
+        when(repository.findById(1L)).thenReturn(Optional.of(existingDocument));
+        byte[] content = "PPT 文件内容".getBytes();
+        when(fileStorage.save("课件.PPTX", content)).thenReturn("lecture.pptx");
+        Document replaced = service.replaceFile(1L, "课件.PPTX", content);
+        assertEquals("pptx", replaced.getFileType());
+        assertEquals("PENDING", replaced.getStatus());
+        verify(processDocument).processAsync(1L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"doc", "docx", "ppt", "pptx", "xls", "xlsx", "pdf", "txt",
+            "md", "markdown", "csv", "tsv", "html", "htm", "rtf", "odt", "ods", "odp", "epub"})
+    void shouldAcceptAllDeclaredFormatsAtUploadBoundary(String type) throws Exception {
+        stubSavingWithId();
+        String filename = "课程." + type;
+        byte[] content = "文件内容".getBytes();
+        when(fileStorage.save(filename, content)).thenReturn(filename);
+        assertEquals(type, service.submitFile(filename, content).getFileType());
+        verify(processDocument).processAsync(1L);
     }
 
     @Test
@@ -85,11 +111,14 @@ class DocumentServiceTest {
         stubSavingWithId();
         when(repository.findById(1L)).thenReturn(Optional.of(existingDocument));
 
+        existingDocument.completeSummary("旧摘要");
         service.update(1L, "新名称", "新正文");
 
         assertEquals("PENDING", existingDocument.getStatus());
         assertEquals("新名称", existingDocument.getName());
         assertEquals("新正文", existingDocument.getContent());
+        assertNull(existingDocument.getSummary());
+        assertEquals("PENDING", existingDocument.getSummaryStatus());
         verify(processDocument).processAsync(1L);
     }
 
@@ -99,6 +128,7 @@ class DocumentServiceTest {
         byte[] content = "替换正文".getBytes();
         existingDocument.setSourceUrl("https://example.com/old");
         existingDocument.setContent("旧正文");
+        existingDocument.completeSummary("旧摘要");
         when(repository.findById(1L)).thenReturn(Optional.of(existingDocument));
         when(fileStorage.save("新版.PDF", content)).thenReturn("new.pdf");
 
@@ -109,6 +139,7 @@ class DocumentServiceTest {
         assertEquals("PENDING", existingDocument.getStatus());
         assertNull(existingDocument.getSourceUrl());
         assertNull(existingDocument.getContent());
+        assertNull(existingDocument.getSummary());
         verify(processDocument).processAsync(1L);
     }
 

@@ -1,9 +1,17 @@
 export async function request(url, options) {
-    const response = await fetch(url, options);
+    let response;
+    try {
+        response = await fetch(url, options);
+    } catch {
+        throw new Error("无法连接服务器，请检查服务和网络后重试");
+    }
     if (response.status === 204) return;
 
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.message);
+    if (response.status === 413) throw new Error("文件超过上传大小限制，请缩小文件后重试");
+    const body = await response.json().catch(() => {
+        throw new Error(`服务器响应格式不正确（${response.status}），请稍后重试`);
+    });
+    if (!response.ok) throw new Error(body.message || `请求失败（${response.status}），请稍后重试`);
     return body;
 }
 
