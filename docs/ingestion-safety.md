@@ -1,6 +1,6 @@
 # 入库安全说明
 
-关联任务：#95、#97、#104，均属于资料库模块 #55。
+关联任务：#95、#97、#104；关键概念与相关资料：[#106](https://github.com/epoch-fresh-2026/personal-knowledge-base-rebuild/issues/106)。均属于资料库模块 #55。
 
 ## 处理流程
 
