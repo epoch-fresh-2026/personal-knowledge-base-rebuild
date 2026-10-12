@@ -142,11 +142,6 @@ button {
     content: "";
 }
 
-.nav-link.disabled {
-    cursor: default;
-    opacity: .48;
-}
-
 .service-state {
     display: inline-flex;
     align-items: center;
@@ -167,11 +162,6 @@ button {
 .service-state.online .status-dot {
     background: var(--success);
     box-shadow: 0 0 0 4px rgba(25, 134, 107, .13);
-}
-
-.service-state.offline .status-dot {
-    background: var(--danger);
-    box-shadow: 0 0 0 4px rgba(200, 76, 76, .13);
 }
 
 main {
@@ -374,8 +364,7 @@ main {
     cursor: pointer;
 }
 
-.drop-zone:hover,
-.drop-zone.dragging {
+.drop-zone:hover {
     border-color: var(--primary);
     background: #f1f8fa;
 }
@@ -475,8 +464,6 @@ main {
 .primary-button,
 .ghost-button,
 .danger-button,
-.edit-button,
-.replace-button,
 .delete-button {
     border: 0;
     border-radius: 10px;
@@ -488,21 +475,6 @@ main {
     display: flex;
     align-items: center;
     gap: 4px;
-}
-
-.edit-button,
-.replace-button {
-    width: 30px;
-    height: 30px;
-    color: #738391;
-    background: transparent;
-    font-size: 15px;
-}
-
-.edit-button:hover,
-.replace-button:hover {
-    color: var(--primary);
-    background: #e8f4f6;
 }
 
 .edit-dialog input[type="file"] {
@@ -1411,30 +1383,6 @@ a.source-card:hover {
     margin-top: 3px;
     color: #8996a3;
     font-size: 8px;
-}
-
-.typing {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    min-width: 58px;
-    min-height: 22px;
-}
-
-.typing i {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: #7894a1;
-    animation: typing 1s infinite ease-in-out;
-}
-
-.typing i:nth-child(2) { animation-delay: .15s; }
-.typing i:nth-child(3) { animation-delay: .3s; }
-
-@keyframes typing {
-    0%, 60%, 100% { transform: translateY(0); opacity: .45; }
-    30% { transform: translateY(-4px); opacity: 1; }
 }
 
 .chat-composer {

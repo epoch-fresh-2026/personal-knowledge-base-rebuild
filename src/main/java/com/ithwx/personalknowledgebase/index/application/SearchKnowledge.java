@@ -1,6 +1,7 @@
 package com.ithwx.personalknowledgebase.index.application;
 
 import com.ithwx.personalknowledgebase.index.domain.KnowledgeIndex;
+import com.ithwx.personalknowledgebase.index.domain.KnowledgeChunk;
 import com.ithwx.personalknowledgebase.index.domain.KnowledgeReranker;
 import com.ithwx.personalknowledgebase.index.domain.SearchQuery;
 import com.ithwx.personalknowledgebase.index.domain.SearchResult;
@@ -9,6 +10,8 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Service
 public class SearchKnowledge {
@@ -36,6 +39,11 @@ public class SearchKnowledge {
     }
 
     public List<SearchResult> search(String question) {
+        return rerank(question, candidates(question));
+    }
+
+    // 子智能体只取候选，所有查询结束后再按用户原问题统一重排。
+    public List<KnowledgeChunk> candidates(String question) {
         if (question == null || question.isBlank()) {
             throw new IllegalArgumentException("检索问题不能为空");
         }
@@ -46,11 +54,16 @@ public class SearchKnowledge {
                 maxResults * CANDIDATE_MULTIPLIER,
                 similarityThreshold
         );
-        return limitContext(knowledgeReranker.rerank(
-                normalizedQuestion,
-                knowledgeIndex.search(query),
-                maxResults
-        ));
+        return knowledgeIndex.search(query);
+    }
+
+    public List<SearchResult> rerank(String question, List<KnowledgeChunk> candidates) {
+        Map<String, KnowledgeChunk> unique = new LinkedHashMap<>();
+        for (KnowledgeChunk chunk : candidates) {
+            unique.putIfAbsent(chunk.documentId() + ":" + chunk.chunkIndex(), chunk);
+        }
+        return limitContext(knowledgeReranker.rerank(question.strip(),
+                List.copyOf(unique.values()), maxResults));
     }
 
     private List<SearchResult> limitContext(List<SearchResult> candidates) {

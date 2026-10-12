@@ -24,7 +24,8 @@ public class LocalFileStorage implements FileStorage {
     @Override
     public String save(String filename, byte[] content) throws IOException {
         Files.createDirectories(storageDirectory);
-        String storedName = UUID.randomUUID() + "." + extensionOf(filename);
+        // 文件格式已由上传入口检查；保留扩展名，使用随机名称存储。
+        String storedName = UUID.randomUUID() + filename.substring(filename.lastIndexOf('.')).toLowerCase(Locale.ROOT);
         Files.write(storageDirectory.resolve(storedName), content);
         return storedName;
     }
@@ -38,11 +39,4 @@ public class LocalFileStorage implements FileStorage {
         return Files.readAllBytes(path);
     }
 
-    private String extensionOf(String filename) {
-        int dot = filename == null ? -1 : filename.lastIndexOf('.');
-        if (dot < 0 || dot == filename.length() - 1) {
-            throw new IllegalArgumentException("无法识别文件格式");
-        }
-        return filename.substring(dot + 1).toLowerCase(Locale.ROOT);
-    }
 }

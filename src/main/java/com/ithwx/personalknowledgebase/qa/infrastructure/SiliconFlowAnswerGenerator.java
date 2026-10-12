@@ -38,7 +38,11 @@ public class SiliconFlowAnswerGenerator implements AnswerGenerator {
                 }
             });
         }
-        return requireAnswer(answer.toString());
+        String text = answer.toString().strip();
+        if (text.isEmpty()) {
+            throw new IllegalStateException("回答模型没有返回内容");
+        }
+        return text;
     }
 
     private String prompt(String question, List<ChatMessage> history, List<Evidence> evidence) {
@@ -75,13 +79,6 @@ public class SiliconFlowAnswerGenerator implements AnswerGenerator {
             }
         }
         return text.isEmpty() ? "无" : text.toString();
-    }
-
-    private String requireAnswer(String answer) {
-        if (answer == null || answer.isBlank()) {
-            throw new IllegalStateException("回答模型没有返回内容");
-        }
-        return answer.strip();
     }
 
     private String formatHistory(List<ChatMessage> history) {

@@ -9,8 +9,7 @@ public record ChatAnswer(
         String question,
         String answer,
         boolean refused,
-        String rewrittenQuestion,
-        boolean secondSearchExecuted,
+        List<String> searchTasks,
         List<AnswerSource> sources
 ) {
     public ChatAnswer withConversationId(Long conversationId) {
@@ -19,8 +18,7 @@ public record ChatAnswer(
                 question,
                 answer,
                 refused,
-                rewrittenQuestion,
-                secondSearchExecuted,
+                searchTasks,
                 sources
         );
     }

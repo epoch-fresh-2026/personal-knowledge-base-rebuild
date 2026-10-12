@@ -16,8 +16,6 @@ public interface DocumentRepository {
 
     List<RelatedDocument> findRelated(Long documentId, Set<String> concepts, int limit);
 
-    boolean existsByContentHash(String hash);
-
     boolean existsOtherWithHash(String hash, Long documentId);
 
     Document save(Document document);

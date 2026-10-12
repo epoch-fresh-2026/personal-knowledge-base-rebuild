@@ -51,10 +51,10 @@ public class IngestionJob {
         if (!pending && !expired) {
             throw new IllegalStateException("入库任务当前不可领取");
         }
-        String validOwner = requireOwner(owner);
+        requireOwner(owner);
         status = IngestionJobStatus.RUNNING;
-        leaseOwner = validOwner;
-        leaseUntil = Objects.requireNonNull(until);
+        leaseOwner = owner;
+        leaseUntil = until;
         attemptCount++;
         lastError = null;
     }
@@ -70,7 +70,7 @@ public class IngestionJob {
         }
         requireFutureDeadline(nextLeaseUntil, now);
         stage = Objects.requireNonNull(nextStage);
-        leaseUntil = Objects.requireNonNull(nextLeaseUntil);
+        leaseUntil = nextLeaseUntil;
         return true;
     }
 
@@ -115,16 +115,15 @@ public class IngestionJob {
     }
 
     private void requireFutureDeadline(LocalDateTime until, LocalDateTime now) {
-        if (!Objects.requireNonNull(until).isAfter(Objects.requireNonNull(now))) {
+        if (!until.isAfter(now)) {
             throw new IllegalArgumentException("租约截止时间必须晚于当前时间");
         }
     }
 
-    private String requireOwner(String owner) {
+    private void requireOwner(String owner) {
         if (owner == null || owner.isBlank()) {
             throw new IllegalArgumentException("任务租约所有者不能为空");
         }
-        return owner;
     }
 
     private void clearLease() {

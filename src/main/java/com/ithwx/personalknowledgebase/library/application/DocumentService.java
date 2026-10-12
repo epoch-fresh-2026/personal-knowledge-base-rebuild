@@ -71,11 +71,12 @@ public class DocumentService {
     }
 
     public Document get(Long id) {
-        return requiredDocument(id);
+        return repository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("资料不存在：" + id));
     }
 
     public List<RelatedDocument> related(Long id) {
-        Document document = requiredDocument(id);
+        Document document = get(id);
         if (!"READY".equals(document.getStatus()) || !"READY".equals(document.getSummaryStatus())
                 || document.getConcepts().isEmpty()) {
             return List.of();
@@ -86,10 +87,10 @@ public class DocumentService {
     @Transactional
     public Document update(Long id, String name, String content) {
         processDocument.cancel(id);
-        Document document = requiredDocument(id);
+        Document document = get(id);
         document.setName(name.strip());
         document.setContent(content);
-        resetProcessingState(document);
+        document.prepareForProcessing();
         return saveAndProcess(document);
     }
 
@@ -97,20 +98,20 @@ public class DocumentService {
     public Document replaceFile(Long id, String filename, byte[] content) throws IOException {
         requireContent(content);
         processDocument.cancel(id);
-        Document document = requiredDocument(id);
+        Document document = get(id);
         document.setName(filename);
         document.setFileType(fileType(filename));
         document.setFilePath(fileStorage.save(filename, content));
         document.setSourceUrl(null);
         document.setContent(null);
-        resetProcessingState(document);
+        document.prepareForProcessing();
         return saveAndProcess(document);
     }
 
     @Transactional
     public void delete(Long id) {
         processDocument.cancel(id);
-        Document document = requiredDocument(id);
+        Document document = get(id);
         repository.delete(document);
         eventPublisher.publishEvent(new DocumentDeleted(id));
     }
@@ -137,15 +138,6 @@ public class DocumentService {
         Document saved = repository.save(document);
         processDocument.processAsync(saved.getId());
         return saved;
-    }
-
-    private Document requiredDocument(Long id) {
-        return repository.findById(id)
-                .orElseThrow(() -> new NoSuchElementException("资料不存在：" + id));
-    }
-
-    private void resetProcessingState(Document document) {
-        document.prepareForProcessing();
     }
 
     private void requireContent(byte[] content) {

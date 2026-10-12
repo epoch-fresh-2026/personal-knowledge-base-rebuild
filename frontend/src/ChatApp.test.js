@@ -111,7 +111,7 @@ test("summary sends the attachment ID, saves the returned conversation and prese
         return new Response(`event:status\ndata:${JSON.stringify({text: "正在读取已保存的文档摘要"})}\n\n`
             + `event:delta\ndata:${JSON.stringify({text: answer})}\n\n`
             + `event:done\ndata:${JSON.stringify({conversationId: 7, answer, sources, refused: false,
-                secondSearchExecuted: false, rewrittenQuestion: null})}\n\n`,
+                searchTasks: []})}\n\n`,
         {headers: {"Content-Type": "text/event-stream"}});
     });
     const vm = createVm();
@@ -134,6 +134,23 @@ test("summary sends the attachment ID, saves the returned conversation and prese
     assert.deepEqual(bodies[1], {conversationId: 7, question: "事务是什么？"});
     assert.equal(vm.messages[3].content, "普通回答");
     assert.equal(vm.question, "");
+});
+
+test("keeps and displays parallel search tasks returned by the stream", async t => {
+    storage(t);
+    const searchTasks = ["如何避免重复处理？", "重启后如何恢复？"];
+    t.mock.method(globalThis, "fetch", async () => new Response(
+        `event:done\ndata:${JSON.stringify({conversationId: 7, answer: "统一回答", sources: [], refused: false, searchTasks})}\n\n`,
+        {headers: {"Content-Type": "text/event-stream"}}));
+    const vm = createVm();
+    vm.question = "如何避免重复处理并在重启后恢复？";
+
+    await vm.askQuestion();
+
+    assert.deepEqual(vm.messages[1].searchTasks, searchTasks);
+    const html = await render(vm);
+    assert.match(html, /并行查询：如何避免重复处理？；重启后如何恢复？/);
+    assert.doesNotMatch(html, /二次检索|已补充查询/);
 });
 
 test("document list errors stay in the picker and can be retried without changing the current selection", async t => {

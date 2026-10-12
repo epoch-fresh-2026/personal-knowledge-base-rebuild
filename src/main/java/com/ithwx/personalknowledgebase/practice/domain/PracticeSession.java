@@ -59,7 +59,7 @@ public class PracticeSession {
     ) {
         return new PracticeSession(
                 null,
-                topic.strip(),
+                topic,
                 generatedQuestion.question(),
                 generatedQuestion.referenceAnswer(),
                 evidenceSnapshot,
@@ -108,10 +108,8 @@ public class PracticeSession {
         if (status != PracticeStatus.WAITING_FOR_ANSWER) {
             throw new IllegalArgumentException("这道练习已经提交过答案");
         }
-        if (answer == null || answer.isBlank()) {
-            throw new IllegalArgumentException("练习答案不能为空");
-        }
-        userAnswer = answer.strip();
+        // 请求入口已校验答案，PracticeService 已去掉首尾空白。
+        userAnswer = answer;
         score = evaluation.score();
         feedback = evaluation.feedback();
         needsReview = score < PASSING_SCORE;

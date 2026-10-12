@@ -54,11 +54,6 @@ public class JpaDocumentRepositoryAdapter implements DocumentRepository {
     }
 
     @Override
-    public boolean existsByContentHash(String hash) {
-        return jpaRepository.existsByContentHash(hash);
-    }
-
-    @Override
     public boolean existsOtherWithHash(String hash, Long documentId) {
         return jpaRepository.existsByContentHashAndIdNot(hash, documentId);
     }

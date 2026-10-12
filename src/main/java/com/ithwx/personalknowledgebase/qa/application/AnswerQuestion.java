@@ -1,18 +1,16 @@
 package com.ithwx.personalknowledgebase.qa.application;
 
 import com.ithwx.personalknowledgebase.index.application.SearchKnowledge;
+import com.ithwx.personalknowledgebase.index.domain.KnowledgeChunk;
 import com.ithwx.personalknowledgebase.index.domain.SearchResult;
 import com.ithwx.personalknowledgebase.qa.domain.AnswerGenerator;
 import com.ithwx.personalknowledgebase.qa.domain.AnswerSource;
 import com.ithwx.personalknowledgebase.qa.domain.ChatMessage;
 import com.ithwx.personalknowledgebase.qa.domain.Evidence;
 import com.ithwx.personalknowledgebase.qa.domain.QuestionJudge;
-import com.ithwx.personalknowledgebase.qa.domain.RetrievalDecision;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,65 +24,55 @@ public class AnswerQuestion {
     private final SearchKnowledge searchKnowledge;
     private final QuestionJudge questionJudge;
     private final AnswerGenerator answerGenerator;
-    private final int maxResults;
-    private final int maxContextChars;
+    private final SearchSubAgent subAgent;
 
     public AnswerQuestion(
             SearchKnowledge searchKnowledge,
             QuestionJudge questionJudge,
             AnswerGenerator answerGenerator,
-            @Value("${app.rag.top-k}") int maxResults,
-            @Value("${app.rag.max-context-chars}") int maxContextChars
+            SearchSubAgent subAgent
     ) {
         this.searchKnowledge = searchKnowledge;
         this.questionJudge = questionJudge;
         this.answerGenerator = answerGenerator;
-        this.maxResults = maxResults;
-        this.maxContextChars = maxContextChars;
+        this.subAgent = subAgent;
     }
 
     public ChatAnswer answerStreaming(String question, List<ChatMessage> history,
                                      Consumer<String> onStatus, Consumer<String> onDelta) {
-        onStatus.accept("正在检索资料");
-        List<Evidence> evidence = search(question);
-        onStatus.accept("找到 " + evidence.size() + " 个片段，正在判断证据");
-        RetrievalDecision decision = questionJudge.decide(question, history, evidence);
-        String rewrittenQuestion = null;
-        boolean secondSearchExecuted = false;
-
-        if (!decision.sufficient() && canRetry(question, decision.rewrittenQuestion())) {
-            rewrittenQuestion = decision.rewrittenQuestion().strip();
-            secondSearchExecuted = true;
-            onStatus.accept("证据不足，正在二次检索");
-            evidence = merge(evidence, search(rewrittenQuestion));
-            onStatus.accept("二次检索完成，正在重新判断证据");
-            decision = questionJudge.decide(question, history, evidence);
+        onStatus.accept("正在分析查询任务");
+        List<String> searchTasks = questionJudge.planSearch(question, history);
+        List<KnowledgeChunk> candidates;
+        if (searchTasks.size() == 2) {
+            onStatus.accept("正在并行查询两个子任务");
+            candidates = subAgent.search(searchTasks, onStatus);
+        } else {
+            onStatus.accept("正在检索资料");
+            candidates = searchKnowledge.candidates(searchTasks.get(0));
         }
 
-        if (!decision.sufficient()) {
+        // 所有候选统一按用户原问题去重、重排，只判断一次证据。
+        onStatus.accept("正在筛选原文证据");
+        List<Evidence> evidence = toEvidence(searchKnowledge.rerank(question, candidates));
+        onStatus.accept("找到 " + evidence.size() + " 个片段，正在判断证据");
+        if (!questionJudge.isSufficient(question, history, evidence)) {
             onStatus.accept("未找到足够依据，将明确拒答");
             onDelta.accept(NO_EVIDENCE_MESSAGE);
             return new ChatAnswer(
                     null, question, NO_EVIDENCE_MESSAGE, true,
-                    rewrittenQuestion, secondSearchExecuted, List.of());
+                    searchTasks, List.of());
         }
 
         onStatus.accept("正在生成回答");
         String answer = answerGenerator.generateStreaming(question, history, evidence, onDelta);
         return new ChatAnswer(
                 null, question, answer, false,
-                rewrittenQuestion, secondSearchExecuted, collectSources(evidence));
+                searchTasks, collectSources(evidence));
     }
 
-    private boolean canRetry(String question, String rewrittenQuestion) {
-        return rewrittenQuestion != null
-                && !rewrittenQuestion.isBlank()
-                && !rewrittenQuestion.strip().equalsIgnoreCase(question);
-    }
-
-    private List<Evidence> search(String question) {
+    private List<Evidence> toEvidence(List<SearchResult> results) {
         List<Evidence> evidence = new ArrayList<>();
-        for (SearchResult result : searchKnowledge.search(question)) {
+        for (SearchResult result : results) {
             var chunk = result.chunk();
             evidence.add(new Evidence(
                     chunk.documentId(),
@@ -99,73 +87,18 @@ public class AnswerQuestion {
         return evidence;
     }
 
-    private List<Evidence> merge(List<Evidence> first, List<Evidence> second) {
-        Map<String, Evidence> unique = new LinkedHashMap<>();
-        for (Evidence item : first) {
-            unique.put(identity(item), item);
-        }
-        for (Evidence item : second) {
-            Evidence existing = unique.get(identity(item));
-            if (existing == null || item.score() > existing.score()) {
-                unique.put(identity(item), item);
-            }
-        }
-
-        List<Evidence> sorted = new ArrayList<>(unique.values());
-        sorted.sort(Comparator.comparingDouble(Evidence::score).reversed());
-
-        List<Evidence> selected = new ArrayList<>();
-        int contextChars = 0;
-        for (Evidence item : sorted) {
-            if (selected.size() == maxResults
-                    || contextChars + item.text().length() > maxContextChars) {
-                break;
-            }
-            selected.add(item);
-            contextChars += item.text().length();
-        }
-        return List.copyOf(selected);
-    }
-
-    private String identity(Evidence evidence) {
-        return evidence.documentId() + ":" + evidence.chunkIndex();
-    }
-
     private List<AnswerSource> collectSources(List<Evidence> evidence) {
-        Map<Long, SourceAccumulator> sources = new LinkedHashMap<>();
+        Map<Long, List<Evidence>> byDocument = new LinkedHashMap<>();
         for (Evidence item : evidence) {
-            SourceAccumulator source = sources.get(item.documentId());
-            if (source == null) {
-                source = new SourceAccumulator(item);
-                sources.put(item.documentId(), source);
-            }
-            source.chunkIndexes.add(item.chunkIndex());
+            byDocument.computeIfAbsent(item.documentId(), id -> new ArrayList<>()).add(item);
         }
 
-        List<AnswerSource> results = new ArrayList<>();
-        for (SourceAccumulator source : sources.values()) {
-            results.add(source.toAnswerSource());
+        List<AnswerSource> sources = new ArrayList<>();
+        for (List<Evidence> items : byDocument.values()) {
+            Evidence first = items.get(0);
+            sources.add(new AnswerSource(first.documentId(), first.documentName(),
+                    first.sourceType(), first.sourceUrl(), items.stream().map(Evidence::chunkIndex).toList()));
         }
-        return results;
-    }
-
-    private static class SourceAccumulator {
-
-        private final Evidence firstEvidence;
-        private final List<Integer> chunkIndexes = new ArrayList<>();
-
-        private SourceAccumulator(Evidence firstEvidence) {
-            this.firstEvidence = firstEvidence;
-        }
-
-        private AnswerSource toAnswerSource() {
-            return new AnswerSource(
-                    firstEvidence.documentId(),
-                    firstEvidence.documentName(),
-                    firstEvidence.sourceType(),
-                    firstEvidence.sourceUrl(),
-                    chunkIndexes
-            );
-        }
+        return sources;
     }
 }

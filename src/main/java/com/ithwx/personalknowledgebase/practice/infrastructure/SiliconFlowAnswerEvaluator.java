@@ -1,5 +1,6 @@
 package com.ithwx.personalknowledgebase.practice.infrastructure;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ithwx.personalknowledgebase.practice.domain.AnswerEvaluator;
 import com.ithwx.personalknowledgebase.practice.domain.PracticeEvaluation;
@@ -58,7 +59,7 @@ public class SiliconFlowAnswerEvaluator implements AnswerEvaluator {
         try {
             return objectMapper.readValue(
                     value.substring(start, end + 1), EvaluationResponse.class);
-        } catch (Exception exception) {
+        } catch (JsonProcessingException exception) {
             throw new IllegalStateException("评分模型未按要求返回 JSON", exception);
         }
     }

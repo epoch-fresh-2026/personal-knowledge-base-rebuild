@@ -87,6 +87,30 @@ class SearchKnowledgeTest {
         return new SearchResult(chunk(documentId, text), score);
     }
 
+    @Test
+    void shouldRetrieveCandidatesWithoutCallingReranker() {
+        SearchKnowledge service = new SearchKnowledge(knowledgeIndex, knowledgeReranker, 5, 2000, 0.55);
+        List<KnowledgeChunk> chunks = List.of(chunk(1L, "原文证据"));
+        when(knowledgeIndex.search(any())).thenReturn(chunks);
+
+        assertEquals(chunks, service.candidates("子问题"));
+
+        verify(knowledgeReranker, never()).rerank(anyString(), anyList(), anyInt());
+    }
+
+    @Test
+    void shouldDeduplicateAcrossTasksBeforeRankingAgainstOriginalQuestion() {
+        SearchKnowledge service = new SearchKnowledge(knowledgeIndex, knowledgeReranker, 2, 2000, 0.55);
+        KnowledgeChunk shared = chunk(1L, "共同命中的片段");
+        KnowledgeChunk other = chunk(2L, "另一个任务的片段");
+        List<SearchResult> ranked = List.of(new SearchResult(other, 0.9), new SearchResult(shared, 0.8));
+        when(knowledgeReranker.rerank("原问题", List.of(shared, other), 2)).thenReturn(ranked);
+
+        assertEquals(ranked, service.rerank("原问题", List.of(shared, shared, other)));
+
+        verify(knowledgeReranker).rerank("原问题", List.of(shared, other), 2);
+    }
+
     private KnowledgeChunk chunk(Long documentId, String text) {
         return new KnowledgeChunk(
                 documentId, "资料" + documentId, "note", null,
