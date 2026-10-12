@@ -35,7 +35,7 @@
                             <div v-else-if="message.content" class="message-bubble">{{ message.content }}</div>
                             <div v-if="message.loading" class="retrieval-trace" role="status">{{ message.stage }}</div>
                             <div v-if="message.error" class="retrieval-trace" role="alert">回答未完成：{{ message.error }}</div>
-                            <div v-if="message.secondSearchExecuted" class="retrieval-trace">已执行二次检索：{{ message.rewrittenQuestion }}</div>
+                            <div v-if="message.searchTasks && message.searchTasks.length === 2" class="retrieval-trace">并行查询：{{ message.searchTasks.join('；') }}</div>
                             <section v-if="message.sources && message.sources.length" class="sources-block">
                                 <div class="sources-title">◎ 回答来源 · {{ message.sources.length }}</div>
                                 <div class="source-list">
@@ -247,8 +247,7 @@ export default {
                     loading: false,
                     refused: result.refused,
                     sources: result.sources,
-                    secondSearchExecuted: result.secondSearchExecuted,
-                    rewrittenQuestion: result.rewrittenQuestion
+                    searchTasks: result.searchTasks
                 });
                 if (summaryDocumentId !== null) this.summaryAttachment = null;
             } catch (error) {

@@ -151,7 +151,7 @@ class ChatServiceTest {
 
         assertEquals(10L, answer.conversationId());
         assertFalse(answer.refused());
-        assertFalse(answer.secondSearchExecuted());
+        assertTrue(answer.searchTasks().isEmpty());
         assertTrue(answer.answer().contains("已保存的文档摘要（模型生成"));
         assertTrue(answer.answer().contains(document.getSummary()));
         assertEquals(List.of(new AnswerSource(38L, "数据库.pdf", "pdf", null, List.of())), answer.sources());
@@ -229,8 +229,7 @@ class ChatServiceTest {
                 "支持什么格式？",
                 "支持 TXT。",
                 false,
-                null,
-                false,
+                List.of("支持什么格式？"),
                 List.of(new AnswerSource(
                         1L, "项目说明", "note", null, List.of(0)))
         );

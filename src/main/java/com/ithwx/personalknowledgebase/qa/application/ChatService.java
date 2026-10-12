@@ -71,7 +71,7 @@ public class ChatService {
             text = "这份资料还没有摘要，请在资料库中生成。";
         }
         // 空片段编号表示来源是文档摘要，不伪装成原文证据。
-        return new ChatAnswer(null, question, text, sources.isEmpty(), null, false, sources);
+        return new ChatAnswer(null, question, text, sources.isEmpty(), List.of(), sources);
     }
 
     private ChatAnswer saveAnswer(Conversation conversation, String normalizedQuestion, ChatAnswer result) {

@@ -106,7 +106,7 @@ class ChatStreamControllerTest {
             Consumer<String> delta = invocation.getArgument(4);
             stage.accept("正在读取已保存的文档摘要");
             delta.accept("已保存的摘要");
-            return new ChatAnswer(7L, "总结资料", "已保存的摘要", false, null, false,
+            return new ChatAnswer(7L, "总结资料", "已保存的摘要", false, List.of(),
                     List.of(new AnswerSource(
                             38L, "数据库.pdf", "pdf", null, List.of())));
         }).when(service).askStreaming(eq(7L), eq("总结资料"), eq(38L), any(), any());
@@ -198,6 +198,6 @@ class ChatStreamControllerTest {
     }
 
     private ChatAnswer answer() {
-        return new ChatAnswer(7L, "问题", "第一段\n第二段", false, null, false, List.of());
+        return new ChatAnswer(7L, "问题", "第一段\n第二段", false, List.of("问题"), List.of());
     }
 }
