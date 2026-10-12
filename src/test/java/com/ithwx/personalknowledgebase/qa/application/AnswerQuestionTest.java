@@ -93,11 +93,12 @@ class AnswerQuestionTest {
         String question = "怎样避免任务重复处理并在重启后恢复？";
         List<String> tasks = List.of("查锁与租约", "查任务恢复");
         SearchResult lock = result(2L, 0, "锁保护任务领取", 0.9);
+        SearchResult lockDetail = result(2L, 1, "事务提交后释放锁", 0.85);
         SearchResult recovery = result(3L, 0, "从已保存阶段恢复", 0.95);
-        List<KnowledgeChunk> candidates = List.of(lock.chunk(), recovery.chunk());
+        List<KnowledgeChunk> candidates = List.of(lock.chunk(), lockDetail.chunk(), recovery.chunk());
         when(questionJudge.planSearch(question, List.of())).thenReturn(tasks);
         when(subAgent.search(eq(tasks), any())).thenReturn(candidates);
-        when(searchKnowledge.rerank(question, candidates)).thenReturn(List.of(recovery, lock));
+        when(searchKnowledge.rerank(question, candidates)).thenReturn(List.of(recovery, lock, lockDetail));
         when(questionJudge.isSufficient(eq(question), anyList(), anyList())).thenReturn(true);
         when(answerGenerator.generateStreaming(eq(question), anyList(), anyList(), any()))
                 .thenReturn("用锁领取，用租约恢复。");
@@ -110,12 +111,13 @@ class AnswerQuestionTest {
         order.verify(subAgent).search(eq(tasks), any());
         order.verify(searchKnowledge).rerank(question, candidates);
         order.verify(questionJudge).isSufficient(eq(question), anyList(), argThat(evidence ->
-                evidence.size() == 2 && evidence.get(0).text().equals("从已保存阶段恢复")));
+                evidence.size() == 3 && evidence.get(0).text().equals("从已保存阶段恢复")));
         order.verify(answerGenerator).generateStreaming(eq(question), anyList(), anyList(), any());
         order.verifyNoMoreInteractions();
         assertFalse(answer.refused());
         assertEquals(tasks, answer.searchTasks());
         assertEquals(List.of(3L, 2L), answer.sources().stream().map(source -> source.documentId()).toList());
+        assertEquals(List.of(0, 1), answer.sources().get(1).chunkIndexes());
         assertTrue(stages.contains("正在并行查询两个子任务"));
     }
 

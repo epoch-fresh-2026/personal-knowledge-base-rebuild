@@ -111,7 +111,7 @@ class ProcessDocument {
                 }
             }
         } catch (Exception exception) {
-            fail(job, leaseOwner, messageOf(exception));
+            committer.fail(job.getId(), leaseOwner, failureReasonOf(exception));
         }
     }
 
@@ -202,19 +202,12 @@ class ProcessDocument {
                 .orElseThrow(() -> new NoSuchElementException("资料不存在：" + id));
     }
 
-    private void fail(IngestionJob job, String leaseOwner, String reason) {
-        committer.fail(job.getId(), leaseOwner, shortReason(reason));
-    }
-
-    private String messageOf(Exception exception) {
+    private String failureReasonOf(Exception exception) {
         String message = exception.getMessage();
-        return message == null || message.isBlank()
-                ? exception.getClass().getSimpleName() : message;
-    }
-
-    private String shortReason(String reason) {
-        String value = reason == null || reason.isBlank() ? "处理失败" : reason;
-        return value.length() <= MAX_FAILURE_REASON_LENGTH
-                ? value : value.substring(0, MAX_FAILURE_REASON_LENGTH);
+        if (message == null || message.isBlank()) {
+            String type = exception.getClass().getSimpleName();
+            message = type.isEmpty() ? "处理失败" : type;
+        }
+        return message.substring(0, Math.min(message.length(), MAX_FAILURE_REASON_LENGTH));
     }
 }

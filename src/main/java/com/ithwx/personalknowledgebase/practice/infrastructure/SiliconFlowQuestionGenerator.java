@@ -1,5 +1,6 @@
 package com.ithwx.personalknowledgebase.practice.infrastructure;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ithwx.personalknowledgebase.practice.domain.GeneratedQuestion;
 import com.ithwx.personalknowledgebase.practice.domain.PracticeSource;
@@ -57,7 +58,7 @@ public class SiliconFlowQuestionGenerator implements QuestionGenerator {
                 %s
                 """.formatted(topic, retryInstruction, formatSources(sources));
 
-        QuestionResponse response = parse(chatModel.call(prompt), QuestionResponse.class);
+        QuestionResponse response = parse(chatModel.call(prompt));
         return new GeneratedQuestion(response.question(), response.referenceAnswer());
     }
 
@@ -72,26 +73,20 @@ public class SiliconFlowQuestionGenerator implements QuestionGenerator {
         return text.toString();
     }
 
-    private <T> T parse(String output, Class<T> type) {
+    private QuestionResponse parse(String output) {
         if (output == null || output.isBlank()) {
             throw new IllegalStateException("出题模型没有返回内容");
         }
-        String json = jsonObject(output);
-        try {
-            return objectMapper.readValue(json, type);
-        } catch (Exception exception) {
-            throw new IllegalStateException("出题模型未按要求返回 JSON", exception);
-        }
-    }
-
-    private String jsonObject(String output) {
-        String value = output.strip();
-        int start = value.indexOf('{');
-        int end = value.lastIndexOf('}');
+        int start = output.indexOf('{');
+        int end = output.lastIndexOf('}');
         if (start < 0 || end < start) {
             throw new IllegalStateException("模型返回内容中没有 JSON 对象");
         }
-        return value.substring(start, end + 1);
+        try {
+            return objectMapper.readValue(output.substring(start, end + 1), QuestionResponse.class);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("出题模型未按要求返回 JSON", exception);
+        }
     }
 
     private record QuestionResponse(String question, String referenceAnswer) {

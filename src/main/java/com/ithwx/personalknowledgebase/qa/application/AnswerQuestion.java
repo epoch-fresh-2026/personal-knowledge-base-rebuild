@@ -88,40 +88,17 @@ public class AnswerQuestion {
     }
 
     private List<AnswerSource> collectSources(List<Evidence> evidence) {
-        Map<Long, SourceAccumulator> sources = new LinkedHashMap<>();
+        Map<Long, List<Evidence>> byDocument = new LinkedHashMap<>();
         for (Evidence item : evidence) {
-            SourceAccumulator source = sources.get(item.documentId());
-            if (source == null) {
-                source = new SourceAccumulator(item);
-                sources.put(item.documentId(), source);
-            }
-            source.chunkIndexes.add(item.chunkIndex());
+            byDocument.computeIfAbsent(item.documentId(), id -> new ArrayList<>()).add(item);
         }
 
-        List<AnswerSource> results = new ArrayList<>();
-        for (SourceAccumulator source : sources.values()) {
-            results.add(source.toAnswerSource());
+        List<AnswerSource> sources = new ArrayList<>();
+        for (List<Evidence> items : byDocument.values()) {
+            Evidence first = items.get(0);
+            sources.add(new AnswerSource(first.documentId(), first.documentName(),
+                    first.sourceType(), first.sourceUrl(), items.stream().map(Evidence::chunkIndex).toList()));
         }
-        return results;
-    }
-
-    private static class SourceAccumulator {
-
-        private final Evidence firstEvidence;
-        private final List<Integer> chunkIndexes = new ArrayList<>();
-
-        private SourceAccumulator(Evidence firstEvidence) {
-            this.firstEvidence = firstEvidence;
-        }
-
-        private AnswerSource toAnswerSource() {
-            return new AnswerSource(
-                    firstEvidence.documentId(),
-                    firstEvidence.documentName(),
-                    firstEvidence.sourceType(),
-                    firstEvidence.sourceUrl(),
-                    chunkIndexes
-            );
-        }
+        return sources;
     }
 }

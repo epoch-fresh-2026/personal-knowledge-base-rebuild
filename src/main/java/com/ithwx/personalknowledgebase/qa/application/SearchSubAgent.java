@@ -27,7 +27,6 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 @Service
 public class SearchSubAgent {
@@ -50,9 +49,11 @@ public class SearchSubAgent {
     }
 
     public List<KnowledgeChunk> search(List<String> tasks, Consumer<String> onStatus) {
-        List<Callable<List<KnowledgeChunk>>> calls = IntStream.range(0, tasks.size())
-                .mapToObj(index -> (Callable<List<KnowledgeChunk>>) () ->
-                        searchTask(tasks.get(index), index + 1, onStatus)).toList();
+        List<Callable<List<KnowledgeChunk>>> calls = new ArrayList<>();
+        for (String task : tasks) {
+            int number = calls.size() + 1;
+            calls.add(() -> searchTask(task, number, onStatus));
+        }
         try {
             // invokeAll 在超时或父线程中断时会取消未完成的子任务。
             var futures = executor.invokeAll(calls, timeout.toMillis(), TimeUnit.MILLISECONDS);
