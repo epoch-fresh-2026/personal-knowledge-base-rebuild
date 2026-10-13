@@ -50,6 +50,11 @@ server:
   tomcat:
     max-swallow-size: 25MB
 
+logging:
+  level:
+    # 排查总结格式时设为 DEBUG，会打印模型返回的摘要和概念。
+    com.ithwx.personalknowledgebase.library.application.SummarizeDocument: ${DOCUMENT_SUMMARY_LOG_LEVEL:INFO}
+
 app:
   storage:
     directory: ${DOCUMENT_STORAGE_DIRECTORY:data/documents}

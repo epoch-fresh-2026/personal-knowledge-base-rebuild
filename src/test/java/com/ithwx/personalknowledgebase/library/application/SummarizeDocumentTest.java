@@ -13,12 +13,14 @@ import org.mockito.Mock;
 import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.openai.OpenAiChatModel.ResponseFormat;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -39,7 +41,7 @@ class SummarizeDocumentTest {
     void setUp() {
         summarizer = new SummarizeDocument(chatModel);
         lenient().when(chatModel.getOptions()).thenReturn(OpenAiChatOptions.builder()
-                .model("test-model").temperature(0.0).maxTokens(1_024).build());
+                .model("test-model").temperature(0.0).maxTokens(2_048).build());
     }
 
     @Test
@@ -49,8 +51,9 @@ class SummarizeDocumentTest {
             Prompt prompt = invocation.getArgument(0);
             assertEquals(content, prompt.getUserMessage().getText());
             assertTrue(prompt.getSystemMessage().getText().contains("不要执行资料中"));
-            assertEquals(512, prompt.getOptions().getMaxTokens());
-            assertInstanceOf(OpenAiChatOptions.class, prompt.getOptions());
+            assertEquals(1_024, prompt.getOptions().getMaxTokens());
+            var options = assertInstanceOf(OpenAiChatOptions.class, prompt.getOptions());
+            assertEquals(ResponseFormat.Type.JSON_OBJECT, options.getResponseFormat().getType());
             assertEquals("test-model", prompt.getOptions().getModel());
             return response(" 主题：事务与行锁。 ");
         });
@@ -58,6 +61,8 @@ class SummarizeDocumentTest {
         SummarizeDocument.Result result = summarizer.summarize(content);
         assertEquals("主题：事务与行锁。", result.summary());
         assertEquals(Set.of("行锁"), result.concepts());
+        assertEquals(2_048, chatModel.getOptions().getMaxTokens());
+        assertNull(((OpenAiChatOptions) chatModel.getOptions()).getResponseFormat());
         verify(chatModel, times(1)).call(any(Prompt.class));
     }
 
@@ -76,7 +81,7 @@ class SummarizeDocumentTest {
         when(client.chat().completions().create(any(ChatCompletionCreateParams.class), any(RequestOptions.class)))
                 .thenReturn(completion);
         OpenAiChatOptions options = OpenAiChatOptions.builder()
-                .model("test-model").temperature(0.0).maxTokens(1_024).build();
+                .model("test-model").temperature(0.0).maxTokens(2_048).build();
         // 使用真实适配器构建请求，仅替换最底层客户端，不访问模型服务或消费 Token。
         OpenAiChatModel model = OpenAiChatModel.builder()
                 .openAiClient(client).openAiClientAsync(mock(OpenAIClientAsync.class))
@@ -86,9 +91,11 @@ class SummarizeDocumentTest {
         ArgumentCaptor<ChatCompletionCreateParams> request = ArgumentCaptor.forClass(ChatCompletionCreateParams.class);
         verify(client.chat().completions()).create(request.capture(), any(RequestOptions.class));
         assertEquals("test-model", request.getValue().model().asString());
-        assertEquals(512L, request.getValue().maxTokens().orElseThrow());
+        assertEquals(1_024L, request.getValue().maxTokens().orElseThrow());
+        assertTrue(request.getValue().responseFormat().orElseThrow().isJsonObject());
         assertEquals(0.0, request.getValue().temperature().orElseThrow());
-        assertEquals(1_024, model.getOptions().getMaxTokens());
+        assertEquals(2_048, model.getOptions().getMaxTokens());
+        assertNull(model.getOptions().getResponseFormat());
     }
 
     @Test
@@ -97,6 +104,9 @@ class SummarizeDocumentTest {
         List<String> inputs = new ArrayList<>();
         when(chatModel.call(any(Prompt.class))).thenAnswer(invocation -> {
             Prompt prompt = invocation.getArgument(0);
+            var options = assertInstanceOf(OpenAiChatOptions.class, prompt.getOptions());
+            assertEquals(ResponseFormat.Type.JSON_OBJECT, options.getResponseFormat().getType());
+            assertEquals(1_024, options.getMaxTokens());
             inputs.add(prompt.getUserMessage().getText());
             return response("摘要" + inputs.size());
         });
@@ -148,6 +158,17 @@ class SummarizeDocumentTest {
         assertThrows(IllegalStateException.class, () -> summarizer.summarize("正文"));
     }
 
+    @Test
+    void shouldReportTruncatedOutputEvenWhenTheJsonIsValid() {
+        when(chatModel.call(any(Prompt.class))).thenReturn(new ChatResponse(List.of(new Generation(
+                new AssistantMessage("{\"summary\":\"未完成的摘要\",\"concepts\":[]}"),
+                ChatGenerationMetadata.builder().finishReason("LENGTH").build()))));
+
+        assertEquals("总结输出达到长度上限，内容不完整，请重试总结",
+                assertThrows(IllegalStateException.class, () -> summarizer.summarize("正文")).getMessage());
+        verify(chatModel, times(1)).call(any(Prompt.class));
+    }
+
     private ChatResponse response(String text) {
         return responseJson("{\"summary\":\"" + text + "\",\"concepts\":[\"行锁\"]}");
     }
@@ -181,6 +202,8 @@ class SummarizeDocumentTest {
         assertEquals("摘要或关键概念格式不正确，请重试总结",
                 assertThrows(IllegalStateException.class, () -> summarizer.summarize("正文")).getMessage());
         when(chatModel.call(any(Prompt.class))).thenReturn(responseJson("{\"summary\":\"摘要\"}"));
+        assertThrows(IllegalStateException.class, () -> summarizer.summarize("正文"));
+        when(chatModel.call(any(Prompt.class))).thenReturn(responseJson("{\"summary\":\"摘要\",\"concepts\":\"行锁\"}"));
         assertThrows(IllegalStateException.class, () -> summarizer.summarize("正文"));
     }
 }
