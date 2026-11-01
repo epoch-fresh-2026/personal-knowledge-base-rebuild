@@ -87,10 +87,15 @@ public class PgVectorKnowledgeIndex implements KnowledgeIndex {
                     .getBytes(StandardCharsets.UTF_8));
             jdbcTemplate.update("""
                     INSERT INTO vector_store (id, content, metadata, embedding)
-                    VALUES (?, ?, jsonb_strip_nulls(jsonb_build_object(
-                        'documentId', CAST(? AS text), 'documentName', CAST(? AS text),
-                        'sourceType', CAST(? AS text), 'sourceUrl', CAST(? AS text),
-                        'chunkIndex', CAST(? AS integer))), CAST(? AS vector))
+                    VALUES (?, ?,
+                    jsonb_strip_nulls(jsonb_build_object(
+                        'documentId', CAST(? AS text),
+                        'documentName', CAST(? AS text),
+                        'sourceType', CAST(? AS text),
+                        'sourceUrl', CAST(? AS text),
+                        'chunkIndex', CAST(? AS integer)
+                        )),
+                        CAST(? AS vector))
                     """, id, chunk.text(), String.valueOf(chunk.documentId()), chunk.documentName(),
                     chunk.sourceType(), chunk.sourceUrl(), chunk.chunkIndex(), vectorLiteral(embedded.embedding()));
         }

@@ -60,7 +60,7 @@ public class DocumentService {
             String url,
             String title
     ) {
-        String name = title == null || title.isBlank() ? url.strip() : title.strip();
+        String name = title == null || title.isBlank() ? url : title;
         Document document = pending(name, "web");
         document.setSourceUrl(url.strip());
         return saveAndProcess(document);

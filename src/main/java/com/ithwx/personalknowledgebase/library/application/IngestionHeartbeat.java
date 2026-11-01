@@ -25,8 +25,7 @@ public class IngestionHeartbeat {
                               @Qualifier("ingestionHeartbeatScheduler") ScheduledExecutorService scheduler,
                               @Value("${app.ingestion.lease-duration:15m}") Duration leaseDuration,
                               @Value("${app.ingestion.heartbeat-interval:30s}") Duration interval) {
-        if (interval.toMillis() < 1 || leaseDuration.isNegative() || leaseDuration.isZero()
-                || interval.compareTo(leaseDuration) >= 0) {
+        if (interval.toMillis() < 1 || interval.compareTo(leaseDuration) >= 0) {
             throw new IllegalArgumentException("心跳间隔必须为正数且小于租约时长");
         }
         this.jobs = jobs;

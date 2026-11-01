@@ -50,15 +50,14 @@ public class SiliconFlowAnswerEvaluator implements AnswerEvaluator {
         if (output == null || output.isBlank()) {
             throw new IllegalStateException("评分模型没有返回内容");
         }
-        String value = output.strip();
-        int start = value.indexOf('{');
-        int end = value.lastIndexOf('}');
+        int start = output.indexOf('{');
+        int end = output.lastIndexOf('}');
         if (start < 0 || end < start) {
             throw new IllegalStateException("评分模型返回内容中没有 JSON 对象");
         }
         try {
             return objectMapper.readValue(
-                    value.substring(start, end + 1), EvaluationResponse.class);
+                    output.substring(start, end + 1), EvaluationResponse.class);
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("评分模型未按要求返回 JSON", exception);
         }
