@@ -75,16 +75,7 @@
                     <article v-for="item in documents" :key="item.id" class="document-card" :style="{'--type-color': typeInfo(item)[1]}">
                         <div class="document-card-head">
                             <span class="type-badge">{{ typeInfo(item)[0] }}</span>
-                            <div class="document-actions">
-                                <button v-if="item.status === 'READY'" type="button" title="总结资料"
-                                        @click="summarizeDocument(item)">{{ ['PENDING', 'PROCESSING'].includes(item.summaryStatus) ? "总结中…" : "查看总结" }}</button>
-                                <button v-if="item.status === 'READY'" type="button" title="相关资料"
-                                        @click="showRelated(item)">相关资料</button>
-                                <button v-if="item.status === 'FAILED'" type="button" title="重新处理" @click="retryDocument(item)">↻</button>
-                                <button v-if="item.fileType === 'note'" type="button" title="修改笔记" @click="openNoteEditor(item)">✎</button>
-                                <button v-if="isFile(item)" type="button" title="替换文件" @click="openFileDialog(item)">↥</button>
-                                <button class="delete-button" type="button" title="删除资料" @click="openDeleteDialog(item)">×</button>
-                            </div>
+                            <button class="delete-button" type="button" title="删除资料" aria-label="删除资料" @click="openDeleteDialog(item)">×</button>
                         </div>
                         <h3>{{ item.name }}</h3>
                         <p v-if="item.sourceUrl" class="document-url">{{ item.sourceUrl }}</p>
@@ -92,6 +83,19 @@
                         <div class="document-meta">
                             <span class="ready-pill">{{ statusText[item.status] || item.status }}</span>
                             <span>{{ item.chunkCount }} 个片段</span><time>{{ formatDate(item.uploadTime) }}</time>
+                        </div>
+                        <div v-if="item.status === 'READY' || item.status === 'FAILED' || item.fileType === 'note' || isFile(item)" class="document-actions">
+                            <button v-if="item.status === 'READY'" class="document-action-primary" type="button" title="总结资料"
+                                    @click="summarizeDocument(item)">{{ ['PENDING', 'PROCESSING'].includes(item.summaryStatus) ? "总结中…" : "查看总结" }}</button>
+                            <button v-if="item.status === 'READY'" type="button" title="相关资料"
+                                    @click="showRelated(item)">相关资料</button>
+                            <button v-if="item.status === 'FAILED'" class="document-action-icon" type="button" title="重新处理" aria-label="重新处理" @click="retryDocument(item)">↻</button>
+                            <button v-if="item.fileType === 'note'" class="document-action-icon" type="button" title="修改笔记" aria-label="修改笔记" @click="openNoteEditor(item)">✎</button>
+                            <button v-if="isFile(item)" class="document-action-icon" type="button" title="替换文件" aria-label="替换文件" @click="openFileDialog(item)">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M12 16V4m-4 4 4-4 4 4M4 16v4h16v-4"/>
+                                </svg>
+                            </button>
                         </div>
                     </article>
                 </div>

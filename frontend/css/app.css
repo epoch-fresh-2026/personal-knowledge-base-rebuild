@@ -471,12 +471,6 @@ main {
     transition: transform .16s ease, background .16s ease, opacity .16s ease;
 }
 
-.document-actions {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
 .edit-dialog input[type="file"] {
     height: auto;
     padding: 10px;
@@ -612,9 +606,70 @@ button:disabled {
 
 .document-card-head {
     display: flex;
-    align-items: start;
+    align-items: center;
     justify-content: space-between;
     gap: 12px;
+}
+
+.document-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+}
+
+.document-actions button {
+    display: inline-flex;
+    min-height: 34px;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--muted);
+    background: var(--paper);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.4;
+    white-space: nowrap;
+    transition: color .16s ease, background .16s ease, border-color .16s ease;
+}
+
+.document-actions button:hover {
+    border-color: #b8c7d2;
+    color: var(--primary);
+    background: var(--canvas);
+}
+
+.document-actions .document-action-primary {
+    border-color: #d2e7ec;
+    color: var(--primary);
+    background: #e8f4f6;
+}
+
+.document-actions .document-action-primary:hover {
+    border-color: #b7d5de;
+    background: #d8edf1;
+}
+
+.document-actions .document-action-icon {
+    width: 34px;
+    padding: 0;
+    font-size: 17px;
+}
+
+.document-actions .document-action-icon:last-child {
+    margin-left: auto;
+}
+
+.document-actions button:focus-visible,
+.delete-button:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
 }
 
 .type-badge {

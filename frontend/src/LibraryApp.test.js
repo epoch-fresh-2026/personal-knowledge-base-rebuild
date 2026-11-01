@@ -50,6 +50,23 @@ test("upload and replacement support the same document formats and ready documen
     assert.match(html, /单个文件最大 20MB/);
 });
 
+test("document cards separate actions from the heading and label icon buttons", async () => {
+    const html = await render({...LibraryApp.data(), documents: [
+        ppt, {...ppt, id: 2, fileType: "note"}, {...ppt, id: 3, status: "FAILED"}
+    ]});
+    const cards = [...html.matchAll(/<article class="document-card"[\s\S]*?<\/article>/g)].map(([card]) => card);
+    assert.equal(cards.length, 3);
+    for (const card of cards) {
+        assert.ok(card.indexOf('class="document-card-head"') < card.indexOf("<h3"));
+        assert.ok(card.indexOf('class="document-actions"') > card.indexOf('class="document-meta"'));
+        assert.match(card, /aria-label="删除资料"/);
+    }
+    assert.match(cards[0], /class="document-action-primary"/);
+    assert.match(cards[0], /aria-label="替换文件"/);
+    assert.match(cards[1], /aria-label="修改笔记"/);
+    assert.match(cards[2], /aria-label="重新处理"/);
+});
+
 test("summary shows loading before response and renders Markdown headings and lists", async t => {
     let complete;
     const pending = new Promise(resolve => { complete = resolve; });
