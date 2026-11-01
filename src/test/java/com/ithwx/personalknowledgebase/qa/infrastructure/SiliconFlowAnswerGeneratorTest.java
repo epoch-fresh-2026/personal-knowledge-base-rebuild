@@ -8,6 +8,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.MessageType;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
@@ -24,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -39,12 +41,23 @@ class SiliconFlowAnswerGeneratorTest {
     @Test
     void shouldGenerateAnswerFromEvidence() {
         SiliconFlowAnswerGenerator generator = new SiliconFlowAnswerGenerator(chatModel, documents);
-        when(chatModel.stream(contains("支持 TXT")))
-                .thenReturn(Flux.just(" 支持 TXT。[证据 1] "));
+        when(chatModel.stream(any(Message.class), any(Message.class))).thenAnswer(invocation -> {
+            Message rules = invocation.getArgument(0);
+            Message input = invocation.getArgument(1);
+            assertEquals(MessageType.SYSTEM, rules.getMessageType());
+            assertEquals(MessageType.USER, input.getMessageType());
+            assertTrue(rules.getText().contains("不得编造信息"));
+            assertTrue(rules.getText().contains("回答有依据的部分"));
+            assertTrue(rules.getText().contains("不要用常识补充原文未给出的例子"));
+            assertTrue(input.getText().contains("支持 TXT"));
+            assertTrue(input.getText().contains("资料支持哪些文档格式？"));
+            assertFalse(input.getText().contains("会话历史"));
+            return Flux.just(" 支持 TXT。[证据 1] ");
+        });
 
         String answer = generator.generateStreaming(
                 "支持什么格式？",
-                List.of(),
+                List.of("资料支持哪些文档格式？"),
                 List.of(new Evidence(
                         1L, "资料", "note", null, 0, "支持 TXT。", 0.9)),
                 ignored -> {}
@@ -59,7 +72,7 @@ class SiliconFlowAnswerGeneratorTest {
         CountDownLatch subscribed = new CountDownLatch(1);
         CountDownLatch firstDelta = new CountDownLatch(1);
         List<String> deltas = new ArrayList<>();
-        when(chatModel.stream(anyString()))
+        when(chatModel.stream(any(Message.class), any(Message.class)))
                 .thenReturn(model.asFlux().doOnSubscribe(ignored -> subscribed.countDown()));
         var executor = Executors.newSingleThreadExecutor();
         try {
@@ -85,7 +98,7 @@ class SiliconFlowAnswerGeneratorTest {
     @Test
     void shouldCancelModelSubscriptionWhenConsumerStops() {
         AtomicBoolean cancelled = new AtomicBoolean();
-        when(chatModel.stream(anyString())).thenReturn(
+        when(chatModel.stream(any(Message.class), any(Message.class))).thenReturn(
                 Flux.just("半截回答").concatWith(Flux.never())
                         .doOnCancel(() -> cancelled.set(true)));
 
@@ -100,7 +113,7 @@ class SiliconFlowAnswerGeneratorTest {
     void shouldCancelModelSubscriptionWhenWorkerIsInterrupted() throws Exception {
         CountDownLatch subscribed = new CountDownLatch(1);
         CountDownLatch cancelled = new CountDownLatch(1);
-        when(chatModel.stream(anyString())).thenReturn(Flux.<String>never()
+        when(chatModel.stream(any(Message.class), any(Message.class))).thenReturn(Flux.<String>never()
                 .doOnSubscribe(ignored -> subscribed.countDown())
                 .doOnCancel(cancelled::countDown));
         var executor = Executors.newSingleThreadExecutor();
@@ -118,11 +131,11 @@ class SiliconFlowAnswerGeneratorTest {
 
     @Test
     void shouldRejectFailedOrEmptyModelStream() {
-        when(chatModel.stream(anyString())).thenReturn(Flux.error(new IllegalStateException("上游失败")));
+        when(chatModel.stream(any(Message.class), any(Message.class))).thenReturn(Flux.error(new IllegalStateException("上游失败")));
         var generator = new SiliconFlowAnswerGenerator(chatModel, documents);
         assertThrows(IllegalStateException.class,
                 () -> generator.generateStreaming("问题", List.of(), List.of(), ignored -> {}));
-        when(chatModel.stream(anyString())).thenReturn(Flux.just("", "  "));
+        when(chatModel.stream(any(Message.class), any(Message.class))).thenReturn(Flux.just("", "  "));
         assertThrows(IllegalStateException.class,
                 () -> generator.generateStreaming("问题", List.of(), List.of(), ignored -> {}));
     }
@@ -140,8 +153,10 @@ class SiliconFlowAnswerGeneratorTest {
         replaced.prepareForProcessing();
         replaced.completeSummary("旧摘要不能作为背景");
         when(documents.findByIds(List.of(1L, 2L, 3L))).thenReturn(List.of(ready, failed, replaced));
-        when(chatModel.stream(anyString())).thenAnswer(invocation -> {
-            String prompt = invocation.getArgument(0);
+        when(chatModel.stream(any(Message.class), any(Message.class))).thenAnswer(invocation -> {
+            Message rules = invocation.getArgument(0);
+            Message input = invocation.getArgument(1);
+            String prompt = rules.getText() + input.getText();
             assertTrue(prompt.contains("全文主题是事务与锁。"));
             assertTrue(prompt.contains("不能代替原文证据"));
             assertTrue(prompt.contains("[证据 1] 原文片段"));
@@ -166,7 +181,11 @@ class SiliconFlowAnswerGeneratorTest {
         document.markReady(1);
         document.completeSummary("已保存的摘要");
         when(documents.findByIds(List.of(1L))).thenReturn(List.of(document));
-        when(chatModel.stream(contains("已保存的摘要"))).thenReturn(Flux.just("回答"));
+        when(chatModel.stream(any(Message.class), any(Message.class))).thenAnswer(invocation -> {
+            Message input = invocation.getArgument(1);
+            assertTrue(input.getText().contains("已保存的摘要"));
+            return Flux.just("回答");
+        });
         assertEquals("回答", new SiliconFlowAnswerGenerator(chatModel, documents).generateStreaming(
                 "问题", List.of(), List.of(new Evidence(1L, "资料", "note", null, 0, "原文", 1.0)), ignored -> {}));
     }

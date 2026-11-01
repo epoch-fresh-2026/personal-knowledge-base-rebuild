@@ -7,6 +7,7 @@ import com.ithwx.personalknowledgebase.qa.domain.AnswerGenerator;
 import com.ithwx.personalknowledgebase.qa.domain.ChatMessage;
 import com.ithwx.personalknowledgebase.qa.domain.MessageRole;
 import com.ithwx.personalknowledgebase.qa.domain.QuestionJudge;
+import com.ithwx.personalknowledgebase.qa.domain.SearchPlan;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -32,7 +33,7 @@ class AnswerQuestionTest {
     void shouldPlanBeforeSingleSearchAndStreamAnswerWithSources() {
         String question = "支持什么格式？";
         SearchResult result = result(1L, 0, "支持 TXT。", 0.9);
-        when(questionJudge.planSearch(question, List.of())).thenReturn(List.of(question));
+        when(questionJudge.planSearch(question, List.of())).thenReturn(new SearchPlan(question, List.of(question)));
         when(searchKnowledge.candidates(question)).thenReturn(List.of(result.chunk()));
         when(searchKnowledge.rerank(question, List.of(result.chunk()))).thenReturn(List.of(result));
         when(questionJudge.isSufficient(eq(question), anyList(), anyList())).thenReturn(true);
@@ -66,17 +67,17 @@ class AnswerQuestionTest {
     }
 
     @Test
-    void shouldSearchResolvedQuestionFromHistoryButAnswerOriginalQuestion() {
+    void shouldRerankResolvedQuestionFromHistoryButAnswerOriginalQuestion() {
         String question = "它怎么连接？";
         String query = "Spring Boot 如何连接数据库？";
         List<ChatMessage> history = List.of(new ChatMessage(MessageRole.USER,
                 "请介绍 Spring Boot", false, List.of(), LocalDateTime.now()));
         SearchResult result = result(1L, 0, "使用 JDBC。", 0.9);
-        when(questionJudge.planSearch(question, history)).thenReturn(List.of(query));
+        when(questionJudge.planSearch(question, history)).thenReturn(new SearchPlan(query, List.of(query)));
         when(searchKnowledge.candidates(query)).thenReturn(List.of(result.chunk()));
-        when(searchKnowledge.rerank(question, List.of(result.chunk()))).thenReturn(List.of(result));
-        when(questionJudge.isSufficient(eq(question), eq(history), anyList())).thenReturn(true);
-        when(answerGenerator.generateStreaming(eq(question), eq(history), anyList(), any()))
+        when(searchKnowledge.rerank(query, List.of(result.chunk()))).thenReturn(List.of(result));
+        when(questionJudge.isSufficient(eq(question), eq(List.of(query)), anyList())).thenReturn(true);
+        when(answerGenerator.generateStreaming(eq(question), eq(List.of(query)), anyList(), any()))
                 .thenReturn("使用 JDBC。[证据 1]");
 
         ChatAnswer answer = service().answerStreaming(question, history, ignored -> {}, ignored -> {});
@@ -84,7 +85,9 @@ class AnswerQuestionTest {
         assertEquals(List.of(query), answer.searchTasks());
         assertEquals(question, answer.question());
         verify(searchKnowledge).candidates(query);
-        verify(answerGenerator).generateStreaming(eq(question), eq(history), anyList(), any());
+        verify(searchKnowledge).rerank(query, List.of(result.chunk()));
+        verify(questionJudge).isSufficient(eq(question), eq(List.of(query)), anyList());
+        verify(answerGenerator).generateStreaming(eq(question), eq(List.of(query)), anyList(), any());
         verifyNoInteractions(subAgent);
     }
 
@@ -96,7 +99,7 @@ class AnswerQuestionTest {
         SearchResult lockDetail = result(2L, 1, "事务提交后释放锁", 0.85);
         SearchResult recovery = result(3L, 0, "从已保存阶段恢复", 0.95);
         List<KnowledgeChunk> candidates = List.of(lock.chunk(), lockDetail.chunk(), recovery.chunk());
-        when(questionJudge.planSearch(question, List.of())).thenReturn(tasks);
+        when(questionJudge.planSearch(question, List.of())).thenReturn(new SearchPlan(question, tasks));
         when(subAgent.search(eq(tasks), any())).thenReturn(candidates);
         when(searchKnowledge.rerank(question, candidates)).thenReturn(List.of(recovery, lock, lockDetail));
         when(questionJudge.isSufficient(eq(question), anyList(), anyList())).thenReturn(true);
@@ -122,13 +125,40 @@ class AnswerQuestionTest {
     }
 
     @Test
+    void shouldRerankBothResolvedAspectsTogetherForFollowUpQuestion() {
+        String question = "它们怎么避免重复处理，重启后又怎么恢复？";
+        String resolvedQuestion = "多个 worker 如何避免重复处理入库任务，服务重启后如何恢复未完成任务？";
+        List<String> tasks = List.of("多个 worker 如何避免重复处理入库任务？", "服务重启后如何恢复未完成任务？");
+        List<ChatMessage> history = List.of(new ChatMessage(MessageRole.USER,
+                "请介绍多个 worker 如何处理入库任务", false, List.of(), LocalDateTime.now()));
+        SearchResult locking = result(2L, 0, "通过锁和租约保护任务领取", 0.9);
+        SearchResult recovery = result(3L, 0, "从数据库保存的阶段恢复", 0.85);
+        List<KnowledgeChunk> candidates = List.of(locking.chunk(), recovery.chunk());
+        when(questionJudge.planSearch(question, history)).thenReturn(new SearchPlan(resolvedQuestion, tasks));
+        when(subAgent.search(eq(tasks), any())).thenReturn(candidates);
+        when(searchKnowledge.rerank(resolvedQuestion, candidates)).thenReturn(List.of(locking, recovery));
+        when(questionJudge.isSufficient(eq(question), eq(tasks), anyList())).thenReturn(true);
+        when(answerGenerator.generateStreaming(eq(question), eq(tasks), anyList(), any()))
+                .thenReturn("用锁和租约领取任务，从保存阶段恢复。");
+
+        ChatAnswer answer = service().answerStreaming(question, history, ignored -> {}, ignored -> {});
+
+        verify(subAgent).search(eq(tasks), any());
+        verify(searchKnowledge).rerank(resolvedQuestion, candidates);
+        verifyNoMoreInteractions(searchKnowledge);
+        verify(answerGenerator).generateStreaming(eq(question), eq(tasks), anyList(), any());
+        assertEquals(question, answer.question());
+        assertEquals(tasks, answer.searchTasks());
+        assertEquals(List.of(2L, 3L), answer.sources().stream().map(source -> source.documentId()).toList());
+    }
+
+    @Test
     void shouldRefuseInsufficientEvidenceWithoutLaunchingAnotherSearch() {
         String question = "复杂问题";
         List<String> tasks = List.of("查询方面一", "查询方面二");
-        when(questionJudge.planSearch(question, List.of())).thenReturn(tasks);
+        when(questionJudge.planSearch(question, List.of())).thenReturn(new SearchPlan(question, tasks));
         when(subAgent.search(eq(tasks), any())).thenReturn(List.of());
         when(searchKnowledge.rerank(question, List.of())).thenReturn(List.of());
-        when(questionJudge.isSufficient(question, List.of(), List.of())).thenReturn(false);
         List<String> deltas = new ArrayList<>();
 
         ChatAnswer answer = service().answerStreaming(question, List.of(), ignored -> {}, deltas::add);
@@ -138,16 +168,31 @@ class AnswerQuestionTest {
         assertTrue(answer.sources().isEmpty());
         verify(subAgent).search(eq(tasks), any());
         verify(questionJudge).planSearch(question, List.of());
-        verify(questionJudge).isSufficient(question, List.of(), List.of());
+        verify(questionJudge, never()).isSufficient(anyString(), anyList(), anyList());
         verify(searchKnowledge).rerank(question, List.of());
         verifyNoMoreInteractions(questionJudge, subAgent, searchKnowledge);
         verifyNoInteractions(answerGenerator);
     }
 
     @Test
+    void shouldRefuseUnrelatedNonEmptyEvidenceWithoutGeneratingAnAnswer() {
+        String question = "任务能自动恢复吗？";
+        SearchResult unrelated = result(1L, 0, "资料只介绍 DNS。", 0.95);
+        when(questionJudge.planSearch(question, List.of())).thenReturn(new SearchPlan(question, List.of(question)));
+        when(searchKnowledge.candidates(question)).thenReturn(List.of(unrelated.chunk()));
+        when(searchKnowledge.rerank(question, List.of(unrelated.chunk()))).thenReturn(List.of(unrelated));
+        when(questionJudge.isSufficient(eq(question), eq(List.of(question)), anyList())).thenReturn(false);
+
+        ChatAnswer answer = service().answerStreaming(question, List.of(), ignored -> {}, ignored -> {});
+
+        assertTrue(answer.refused());
+        verifyNoInteractions(answerGenerator);
+    }
+
+    @Test
     void shouldNotGenerateAnswerWhenSubagentFails() {
         List<String> tasks = List.of("查询方面一", "查询方面二");
-        when(questionJudge.planSearch("复杂问题", List.of())).thenReturn(tasks);
+        when(questionJudge.planSearch("复杂问题", List.of())).thenReturn(new SearchPlan("复杂问题", tasks));
         when(subAgent.search(eq(tasks), any())).thenThrow(new IllegalStateException("子任务失败"));
 
         assertThrows(IllegalStateException.class, () -> service()
