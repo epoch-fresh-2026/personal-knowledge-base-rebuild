@@ -8,6 +8,7 @@ import com.ithwx.personalknowledgebase.qa.domain.AnswerSource;
 import com.ithwx.personalknowledgebase.qa.domain.ChatMessage;
 import com.ithwx.personalknowledgebase.qa.domain.Evidence;
 import com.ithwx.personalknowledgebase.qa.domain.QuestionJudge;
+import com.ithwx.personalknowledgebase.qa.domain.SearchPlan;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -41,7 +42,8 @@ public class AnswerQuestion {
     public ChatAnswer answerStreaming(String question, List<ChatMessage> history,
                                      Consumer<String> onStatus, Consumer<String> onDelta) {
         onStatus.accept("正在分析查询任务");
-        List<String> searchTasks = questionJudge.planSearch(question, history);
+        SearchPlan plan = questionJudge.planSearch(question, history);
+        List<String> searchTasks = plan.searchTasks();
         List<KnowledgeChunk> candidates;
         if (searchTasks.size() == 2) {
             onStatus.accept("正在并行查询两个子任务");
@@ -51,11 +53,12 @@ public class AnswerQuestion {
             candidates = searchKnowledge.candidates(searchTasks.get(0));
         }
 
-        // 所有候选统一按用户原问题去重、重排，只判断一次证据。
+        // 所有候选按补全指代后的完整问题统一重排，覆盖全部查询意图。
         onStatus.accept("正在筛选原文证据");
-        List<Evidence> evidence = toEvidence(searchKnowledge.rerank(question, candidates));
+        List<Evidence> evidence = toEvidence(searchKnowledge.rerank(plan.resolvedQuestion(), candidates));
         onStatus.accept("找到 " + evidence.size() + " 个片段，正在判断证据");
-        if (!questionJudge.isSufficient(question, history, evidence)) {
+        // 没有原文就直接拒答；有原文时只传本轮查询，不把历史拒答带入判断。
+        if (evidence.isEmpty() || !questionJudge.isSufficient(question, searchTasks, evidence)) {
             onStatus.accept("未找到足够依据，将明确拒答");
             onDelta.accept(NO_EVIDENCE_MESSAGE);
             return new ChatAnswer(
@@ -64,7 +67,7 @@ public class AnswerQuestion {
         }
 
         onStatus.accept("正在生成回答");
-        String answer = answerGenerator.generateStreaming(question, history, evidence, onDelta);
+        String answer = answerGenerator.generateStreaming(question, searchTasks, evidence, onDelta);
         return new ChatAnswer(
                 null, question, answer, false,
                 searchTasks, collectSources(evidence));

@@ -4,11 +4,11 @@ import java.util.List;
 
 public interface QuestionJudge {
 
-    List<String> planSearch(String question, List<ChatMessage> history);
+    SearchPlan planSearch(String question, List<ChatMessage> history);
 
     boolean isSufficient(
             String question,
-            List<ChatMessage> history,
+            List<String> searchTasks,
             List<Evidence> evidence
     );
 }

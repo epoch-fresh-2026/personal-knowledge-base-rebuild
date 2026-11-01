@@ -7,7 +7,7 @@ public interface AnswerGenerator {
 
     String generateStreaming(
             String question,
-            List<ChatMessage> history,
+            List<String> searchTasks,
             List<Evidence> evidence,
             Consumer<String> onDelta
     );
