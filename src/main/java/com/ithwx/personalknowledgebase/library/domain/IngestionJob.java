@@ -15,8 +15,8 @@ public class IngestionJob {
     private Long id;
     private Long version;
     private Long documentId;
-    private IngestionStage stage;//提取中，索引中，总结中，完成
-    private IngestionJobStatus status;//待处理，运行中，已完成，失败，已取消
+    private IngestionStage stage;
+    private IngestionJobStatus status;
     private int attemptCount;
     private String leaseOwner;
     private LocalDateTime leaseUntil;

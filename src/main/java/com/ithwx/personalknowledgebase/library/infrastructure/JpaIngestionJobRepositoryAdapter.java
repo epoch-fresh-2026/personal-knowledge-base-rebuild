@@ -25,8 +25,8 @@ public class JpaIngestionJobRepositoryAdapter implements IngestionJobRepository 
     @Override
     @Transactional
     public IngestionJob restart(Long documentId) {
-        ensureRow(documentId);//保证记录存在，没有就新增
-        IngestionJob job = requiredByDocumentIdForUpdate(documentId);//加锁读取这条记录，不存在就报错
+        ensureRow(documentId);
+        IngestionJob job = requiredByDocumentIdForUpdate(documentId);
         job.reset();
         return toDomain(jpaRepository.saveAndFlush(toEntity(job)));
     }

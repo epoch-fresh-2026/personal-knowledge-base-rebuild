@@ -65,39 +65,34 @@ class ProcessDocument {
     }
 
     public void processAsync(Long documentId) {
-        jobRepository.restart(documentId);//在数据库中创建或重置这份文档的处理任务。
-        triggerWorker();//通知线程池安排后台执行。
+        jobRepository.restart(documentId);
+        triggerWorker();
     }
 
     void processNext() {
         String leaseOwner = instanceId + ":" + UUID.randomUUID();
         LocalDateTime now = LocalDateTime.now();
-        jobRepository.claimNext(leaseOwner, now, now.plus(leaseDuration))//查找可执行任务，通过数据库行锁抢占任务，
-                                                                 // 分配leaseOwner租赁持有者、设置租赁到期时间，更新任务记录
+        jobRepository.claimNext(leaseOwner, now, now.plus(leaseDuration))
                 .ifPresent(job -> process(job, leaseOwner));
     }
 
     void process(IngestionJob job, String leaseOwner) {
         try (IngestionHeartbeat.Lease lease = heartbeat.watch(job.getId(), leaseOwner)) {
-                                 //取出任务对应的文档，document标记为处理中PROCESSING
             Document document = committer.start(job.getId(), leaseOwner).orElse(null);
             if (document == null || !lease.isValid()) {
                 return;
             }
             if (job.getStage() == IngestionStage.EXTRACTING) {
-                                                 //得到正文；文字笔记直接使用你输入的文字
                 DocumentExtractor.Result result = extractor.extract(document);
                 if (!lease.isValid()) {
                     return;
                 }
-                           //保存正文，记录“接下来建立索引”
                 document = committer.extracted(job.getId(), leaseOwner, result).orElse(null);
                 if (document == null) {
                     return;
                 }
             }
             if (job.getStage() != IngestionStage.SUMMARIZING && lease.isValid()) {
-                                          //切分正文、计算向量，得到准备好的索引数据
                 PreparedIndex prepared = indexDocument.prepare(toTextReady(document));
                 if (!lease.isValid() || !committer.indexed(job.getId(), leaseOwner, prepared)) {
                     return;

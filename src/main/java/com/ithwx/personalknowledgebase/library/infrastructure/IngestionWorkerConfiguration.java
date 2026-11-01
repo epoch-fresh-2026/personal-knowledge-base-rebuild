@@ -16,7 +16,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 class IngestionWorkerConfiguration {
 
     @Bean(name = "ingestionHeartbeatScheduler", destroyMethod = "shutdownNow")
-                                     //Spring 容器关闭时，自动调用 shutdownNow () 关闭线程池，强制中断正在执行的任务，释放线程。
     ScheduledExecutorService ingestionHeartbeatScheduler() {
         AtomicInteger sequence = new AtomicInteger();
         ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(2, runnable -> {
@@ -42,7 +41,6 @@ class IngestionWorkerConfiguration {
         executor.setQueueCapacity(queueCapacity);
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(30);
-        executor.initialize();
         return executor;
     }
 }

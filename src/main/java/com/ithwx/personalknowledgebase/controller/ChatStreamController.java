@@ -50,18 +50,13 @@ public class ChatStreamController {
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<?> stream(@Valid @RequestBody ChatRequest request) {
-       //创建一个可以不断向前端发送事件的工具，异步请求超时时间设为 300000 毫秒，也就是 5 分钟。
         SseEmitter emitter = new SseEmitter(300_000L);
-        /*  停止发送的标记
-           false：还没有标记结束，可以尝试发送（默认）
-           true：已经标记结束，不要继续发送*/
         AtomicBoolean closed = new AtomicBoolean();
-        //FutureTask：先写任务单，还没有开始工作
         FutureTask<Void> work = new FutureTask<>(() -> {
             try {
                 ChatAnswer answer = chatService.askStreaming(request.conversationId(), request.question(), request.summaryDocumentId(),
-                        text -> send(emitter, closed, "status", Map.of("text", text)),//你有进度消息时，就把它作为 status 事件发送
-                        text -> send(emitter, closed, "delta", Map.of("text", text)));//你收到一段模型回答时，就把它作为 delta 事件发送。
+                        text -> send(emitter, closed, "status", Map.of("text", text)),
+                        text -> send(emitter, closed, "delta", Map.of("text", text)));
                 // 会话保存成功后才发送 done；客户端以它判断本轮是否真正完成。
                 send(emitter, closed, "done", answer);
                 emitter.complete();
@@ -74,30 +69,26 @@ public class ChatStreamController {
             return null;
         });
 
-        //准备“停止开关”。先定义一个操作，此时还没有执行取消，以后调用：cancel.run();才执行
         Runnable cancel = () -> {
-            closed.set(true);//把标记改成“不要再发送”。
-            work.cancel(true);//尝试取消任务；如果已经在运行，允许向执行它的线程发送中断信号。
+            closed.set(true);
+            work.cancel(true);
         };
-        emitter.onCompletion(cancel);//等事件流结束时，执行取消和清理操作。
-        emitter.onError(error -> cancel.run());//等连接发生错误时，执行取消操作。正常完成也可能触发它，这是统一收尾，不代表回答出错了。
+        emitter.onCompletion(cancel);
+        emitter.onError(error -> cancel.run());
         emitter.onTimeout(() -> {
             // 超时时连接已不再接受新事件；结束流，前端因缺少 done 明确提示未完成。
             cancel.run();
             emitter.complete();
-        });//等请求超时时，取消任务，并结束事件流。
+        });
 
         try {
-            executor.execute(work);//把任务单交给后台工作人员执行。
+            executor.execute(work);
         } catch (RejectedExecutionException exception) {
             cancel.run();
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(Map.of("message", "当前问答繁忙，请稍后重试"));
         }
-        //ResponseEntity.ok().body(emitter);返回 HTTP 200，并把后续发送内容的 emitter 交给 Spring 管理。
-        //CacheControl.noStore()：告诉浏览器不要缓存响应内容。
-        //contentType(new MediaType(MediaType.TEXT_EVENT_STREAM, StandardCharsets.UTF_8))：告诉浏览器这是一个文本事件流，编码为 UTF-8。
         //header("X-Accel-Buffering", "no")：提示支持这个响应头的代理不要把片段攒着统一发送。
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .contentType(new MediaType(MediaType.TEXT_EVENT_STREAM, StandardCharsets.UTF_8))

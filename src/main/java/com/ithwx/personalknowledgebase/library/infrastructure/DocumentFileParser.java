@@ -60,18 +60,17 @@ public class DocumentFileParser {
     }
 
     private String parseDocument(String filename, byte[] bytes) throws IOException {
-        Metadata metadata = new Metadata();//Tika 的元数据对象，存放文件信息
+        Metadata metadata = new Metadata();
         metadata.set(TikaCoreProperties.RESOURCE_NAME_KEY, filename);
-        BodyContentHandler handler = new BodyContentHandler(-1);//接收解析出来的文本内容
-        ParseContext context = new ParseContext();//解析上下文，用来给特定解析器传配置参数
-        PDFParserConfig pdf = new PDFParserConfig();//PDF 专用解析配置
+        BodyContentHandler handler = new BodyContentHandler(-1);
+        ParseContext context = new ParseContext();
+        PDFParserConfig pdf = new PDFParserConfig();
         pdf.setOcrStrategy(PDFParserConfig.OCR_STRATEGY.NO_OCR);
         context.set(PDFParserConfig.class, pdf);
         TesseractOCRConfig ocr = new TesseractOCRConfig();
         ocr.setSkipOcr(true);
         context.set(TesseractOCRConfig.class, ocr);
         try (ByteArrayInputStream input = new ByteArrayInputStream(bytes)) {
-                        //输入流、文本处理器、元数据、解析配置上下文
             parser.parse(input, handler, metadata, context);
             return handler.toString();
         } catch (TikaException | SAXException exception) {
